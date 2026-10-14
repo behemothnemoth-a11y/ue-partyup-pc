@@ -2,7 +2,7 @@
 
 Independent Windows desktop controller for Ultimate Ears PartyUp, with one main speaker and up to nine guests.
 
-**Private preview, version 0.2.0.** Two EVERBOOMs have been tested with PC audio and a Start → Stop → Start cycle in the earlier controller. The expanded ten-speaker workflow, new controls and older-speaker adapter have automated tests; physical acceptance remains model- and control-specific. The repository stays private until the owner approves publication. Not affiliated with Logitech or Ultimate Ears.
+**Private preview, version 0.2.1.** Two EVERBOOMs have been tested with PC audio and a Start → Stop → Start cycle in the earlier controller. The expanded ten-speaker workflow, new controls and older-speaker adapter have automated tests; physical acceptance remains model- and control-specific. The repository stays private until the owner approves publication. Not affiliated with Logitech or Ultimate Ears.
 
 ## Use
 
@@ -19,6 +19,12 @@ Requirements: Windows 10/11, Bluetooth Classic and BLE, Python 3.13 with tkinter
 Change the main speaker deliberately: stop the old group, choose the new main and guests, start the new group, then switch Windows audio output. Automatic migration and automatic Windows output switching are not implemented.
 
 The original development launcher can reuse the approved local Bluetooth environment. A fresh clone uses Setup.cmd. Selection and remembered identities are saved under ignored `data/`; addresses are never included in project documentation or committed diagnostic reports.
+
+## Interface
+
+Version 0.2.1 adds a dark, dependency-free Tkinter control-desk theme with a prominent source-to-receiver overview, clear speaker-count and broadcast-state indicators, distinct Start/Stop button colors and a compact local diagnostics view. Each tab can scroll to reach its controls at smaller window sizes, while the four Group actions remain pinned above the activity log. Selecting a device does not assume it is online, and a broadcast-state result does not claim audible playback. All feature eligibility still comes from actual speaker replies.
+
+All UI styling lives in `ue_partyup/theme.py` and can be changed without altering the Bluetooth protocol. See [UI design and review notes](docs/UI.md).
 
 ## Controls
 

@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import tkinter as tk
+from tkinter import ttk
 import unittest
 from unittest.mock import patch
 from ue_partyup.app import PartyUpApp, load_selection, parse_mac, format_value
@@ -66,6 +67,27 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(self.app.notebook.tabs()), 4)
         self.assertTrue(self.app.volume_scale.instate(['disabled']))
         self.assertEqual(self.app.device_combo.get(), '')
+
+    def test_redesigned_tabs_scroll_and_group_actions_stay_visible(self):
+        self.assertEqual(set(self.app.tab_viewports),
+                         {'Group', 'Speaker', 'Sound', 'PartyUp settings'})
+        footer = self.app.tab_viewports['Group'].footer
+        labels = [child.cget('text')
+                  for row in footer.winfo_children() for child in row.winfo_children()
+                  if isinstance(child, ttk.Button)]
+        self.assertEqual(labels, ['Start PartyUp', 'Add selected guests',
+                                  'Check group', 'Stop PartyUp'])
+        self.assertEqual(self.app.tab_viewports['Group'].canvas.cget('height'), '220')
+
+    def test_status_badge_does_not_invent_active_audio(self):
+        self.app.show_discovery([Speaker(1), Speaker(2)], [])
+        self.assertEqual(self.app.device_count.get(), '2 PAIRED RECORDS')
+        self.assertEqual(self.app.group_status.get(), 'STATUS NOT CHECKED')
+        self.app.show_group(GroupResult('status', True, [
+            MemberResult(Speaker(2), 'reported by main speaker')]))
+        self.assertEqual(self.app.group_status.get(), 'BROADCAST ON')
+        self.app.clear_group_results()
+        self.assertEqual(self.app.group_status.get(), 'STATUS NOT CHECKED')
 
     def test_more_than_nine_guests_cannot_start_worker(self):
         speakers = [Speaker(index) for index in range(1, 12)]

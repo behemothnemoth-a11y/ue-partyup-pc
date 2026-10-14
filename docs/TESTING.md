@@ -74,3 +74,11 @@ A separate one-shot read-only diagnostic in the Codex work area used the same `d
 This pass sent **no PartyUp Start/Stop, BLE join/leave, power, volume, EQ, channel, firmware or other settings-mutation request**. No new audible playback or stop-silence result is claimed. The fully interactive GUI button flow was not systematically certified by the independent read-only runner; continue to distinguish backend readback from GUI usability. Do not attempt a disruptive group restart without announcing it first.
 
 Next: reproduce and characterize guest-control readback limits and sporadic connection timeouts using read-only, bounded requests; then run owner-observed GUI control actions and listening acceptance in a separate stage.
+
+## 2026-10-14 v0.2.1 presentation-only redesign
+
+Implemented a local Tkinter/ttk dark audio-console theme, tab scrolling, always-visible Group Start/Add/Check/Stop controls, per-speaker paired-record count and a broadcast-status label that never implies audible audio from an unobserved state. Existing controls and callback semantics were retained. No hardware/group commands were sent to validate the appearance; default launched discovery reads Windows paired records only.
+
+The first automated pass detected an unsupported Tk Text styling property. Removed that property and reran the full suite: 107/107 passing; an additional two UI regression tests were subsequently added, bringing the expected count to 109. The full **109/109 automated tests passed**, as did the GUI smoke launch. The minimum 960 × 760 layout check kept status and diagnostics visible while the four tab contents remained scrollable. A captured local v0.2.1 Group window was inspected for contrast, layout, a visible Start/Stop footer and unclipped status, log and closing advice; an initial clipped-bottom issue was resolved with bounded tab viewports and a pinned action footer.
+
+No screenshot, MAC/address, raw Bluetooth capture or PC-specific diagnostic file is to be committed. This is a software/UI milestone, not new device compatibility evidence.

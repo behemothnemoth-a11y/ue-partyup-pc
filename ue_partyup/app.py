@@ -12,6 +12,7 @@ from tkinter.scrolledtext import ScrolledText
 from .controller import discover
 from .groups import GroupManager
 from . import __version__
+from .theme import apply_theme, ScrollableTab, INPUT, INK, MUTED, ACCENT, BORDER
 
 
 DATA = Path(__file__).resolve().parents[1] / 'data'
@@ -76,6 +77,8 @@ class PartyUpApp:
         self.feature_widgets = {}
         self.status = tk.StringVar(value='Find paired speakers to begin.')
         self.group_count = tk.StringVar(value='0 guests selected · maximum 9')
+        self.group_status = tk.StringVar(value='STATUS NOT CHECKED')
+        self.device_count = tk.StringVar(value='AWAITING DISCOVERY')
         self.device_summary = tk.StringVar(value='Choose a speaker, then read its controls.')
         self.experimental = tk.BooleanVar(value=False)
         self.outdoor = tk.BooleanVar(value=False)
@@ -89,48 +92,97 @@ class PartyUpApp:
         self.eq_bands = [tk.DoubleVar(value=0) for _ in range(5)]
         self.saved_host, self.saved_guests = load_selection(data_path / 'selection.json')
         root.title(f'UE PartyUp PC {__version__} — private preview')
-        root.geometry('1110x860')
-        root.minsize(850, 720)
-        frame = ttk.Frame(root, padding=18)
-        frame.pack(fill='both', expand=True)
-        ttk.Label(frame, text='UE PartyUp PC', font=('Segoe UI', 23, 'bold')).pack(anchor='w')
-        ttk.Label(frame, text='Up to 10 speakers · Private testing preview · Hardware verification still in progress',
-                  padding=(0, 3, 0, 12)).pack(anchor='w')
-        toolbar = ttk.Frame(frame)
-        toolbar.pack(fill='x')
-        self.button(toolbar, 'Find speakers', self.refresh).pack(side='left', padx=(0, 12))
-        toggle = ttk.Checkbutton(toolbar, text='Enable experimental older-speaker compatibility',
-                                 variable=self.experimental, command=self.update_enabled)
-        toggle.pack(side='left')
+        root.geometry('1180x900')
+        root.minsize(960, 760)
+        apply_theme(root)
+        shell = ttk.Frame(root, style='Shell.TFrame', padding=(18, 14, 18, 10))
+        shell.pack(fill='both', expand=True)
+
+        # Studio-style header. The count is paired records, not a claim of audio.
+        hero = ttk.Frame(shell, style='Hero.TFrame', padding=(22, 14))
+        hero.pack(fill='x')
+        brand = ttk.Frame(hero, style='Hero.TFrame')
+        brand.pack(side='left', fill='x', expand=True)
+        ttk.Label(brand, text='UE  /  AUDIO CONTROL DESK    •    PRIVATE PREVIEW',
+                  style='Kicker.TLabel').pack(anchor='w')
+        ttk.Label(brand, text='PartyUp', style='HeroTitle.TLabel').pack(anchor='w', pady=(2, 0))
+        ttk.Label(brand, text='One source. A room full of sound. Controlled from your PC.',
+                  style='HeroSub.TLabel').pack(anchor='w')
+        overview = ttk.Frame(hero, style='Hero.TFrame')
+        overview.pack(side='right', padx=(20, 0))
+        ttk.Label(overview, textvariable=self.device_count,
+                  style='HeroBadge.TLabel').pack(anchor='e')
+        ttk.Label(overview, text='EVERBOOM VERIFIED PAIR  /  UP TO 10 IN SOFTWARE',
+                  style='HeroSub.TLabel').pack(anchor='e', pady=(10, 0))
+
+        toolbar = ttk.Frame(shell, style='Toolbar.TFrame', padding=(15, 9))
+        toolbar.pack(fill='x', pady=(11, 9))
+        toolbar_top = ttk.Frame(toolbar, style='Toolbar.TFrame')
+        toolbar_top.pack(fill='x', pady=(0, 7))
+        ttk.Label(toolbar_top, text='SPEAKER LIBRARY', style='ToolbarTitle.TLabel').pack(side='left')
+        toggle = ttk.Checkbutton(toolbar_top, text='Experimental older speakers',
+                                 variable=self.experimental, command=self.update_enabled,
+                                 style='Toolbar.TCheckbutton')
+        toggle.pack(side='right')
         self.controls.append((toggle, 'normal'))
-        ttk.Label(toolbar, text='Speaker controls:').pack(side='left', padx=(18, 5))
-        self.device_combo = ttk.Combobox(toolbar, state='readonly', width=28)
+        toolbar_controls = ttk.Frame(toolbar, style='Toolbar.TFrame')
+        toolbar_controls.pack(fill='x')
+        self.button(toolbar_controls, 'Find speakers', self.refresh,
+                    variant='Quiet.TButton').pack(side='left', padx=(0, 12))
+        ttk.Label(toolbar_controls, text='Control target', style='ToolbarMuted.TLabel').pack(side='left', padx=(0, 9))
+        self.device_combo = ttk.Combobox(toolbar_controls, state='readonly', width=34)
         self.device_combo.pack(side='left', fill='x', expand=True)
         self.controls.append((self.device_combo, 'readonly'))
         self.device_combo.bind('<<ComboboxSelected>>', self.device_changed)
-        self.button(toolbar, 'Read controls', self.read_controls).pack(side='left', padx=(8, 0))
-        self.notebook = ttk.Notebook(frame)
-        self.notebook.pack(fill='both', expand=True, pady=12)
+        self.button(toolbar_controls, 'Read controls', self.read_controls,
+                    variant='Primary.TButton').pack(side='left', padx=(12, 0))
+
+        self.notebook = ttk.Notebook(shell)
+        self.notebook.pack(fill='both', expand=True, pady=(1, 10))
         tabs = {}
+        self.tab_viewports = {}
         for name in ('Group', 'Speaker', 'Sound', 'PartyUp settings'):
-            tab = ttk.Frame(self.notebook, padding=14)
-            self.notebook.add(tab, text=name)
-            tabs[name] = tab
+            viewport = ScrollableTab(self.notebook)
+            self.notebook.add(viewport, text=name)
+            self.tab_viewports[name] = viewport
+            tabs[name] = viewport.content
         self.build_group(tabs['Group'])
         self.build_device(tabs['Speaker'])
         self.build_sound(tabs['Sound'])
         self.build_partyup(tabs['PartyUp settings'])
-        ttk.Label(frame, textvariable=self.status, wraplength=1040).pack(anchor='w', pady=(0, 7))
-        self.log = ScrolledText(frame, height=6, state='disabled', font=('Segoe UI', 9), wrap='word')
+        for viewport in self.tab_viewports.values():
+            viewport.enable_wheel()
+
+        status_strip = ttk.Frame(shell, style='Toolbar.TFrame', padding=(4, 0))
+        status_strip.pack(fill='x', pady=(0, 8))
+        ttk.Label(status_strip, text='STATUS  •', style='Count.TLabel').pack(side='left')
+        self.status_widget = ttk.Label(status_strip, textvariable=self.status,
+                                       style='Status.TLabel', wraplength=930)
+        self.status_widget.pack(side='left', fill='x', expand=True)
+        log_heading = ttk.Frame(shell, style='Shell.TFrame')
+        log_heading.pack(fill='x', pady=(0, 6))
+        ttk.Label(log_heading, text='ACTIVITY  /  DIAGNOSTICS',
+                  style='Footer.TLabel').pack(side='left')
+        ttk.Label(log_heading, text='Local only · No telemetry',
+                  style='Footer.TLabel').pack(side='right')
+        self.log = ScrolledText(shell, height=3, state='disabled', wrap='word',
+                                font=('Consolas', 9), bg=INPUT, fg=MUTED,
+                                insertbackground=INK,
+                                selectbackground='#286960', selectforeground='#FFFFFF',
+                                relief='flat', bd=0, highlightthickness=1,
+                                highlightbackground=BORDER, highlightcolor=ACCENT,
+                                padx=12, pady=9)
         self.log.pack(fill='x')
-        ttk.Label(frame, text='Close the phone app before connecting. Closing this window leaves the speaker group playing.',
-                  padding=(0, 8, 0, 0)).pack(anchor='w')
+        ttk.Label(shell, style='Footer.TLabel',
+                  text='Close the UE phone app before connecting. Closing this window leaves an active group playing.').pack(
+                      anchor='w', pady=(4, 0))
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.update_enabled()
         self.poll()
 
-    def button(self, parent, label, command, feature=None):
-        button = ttk.Button(parent, text=label, command=command)
+    def button(self, parent, label, command, feature=None, variant=None):
+        button = ttk.Button(parent, text=label, command=command,
+                            style=variant or 'TButton', cursor='hand2')
         self.controls.append((button, 'normal'))
         if feature:
             self.feature_widgets.setdefault(feature, []).append(button)
@@ -143,22 +195,33 @@ class PartyUpApp:
         return widget
 
     def build_group(self, tab):
-        ttk.Label(tab, text='Choose the main speaker that Windows plays audio through, then select up to nine guests.',
-                  wraplength=990).pack(anchor='w')
+        ttk.Label(tab, text='GROUP ROUTING', style='Section.TLabel').pack(anchor='w')
+        ttk.Label(tab, text='Choose a main audio source and up to nine guests. The speakers distribute audio themselves.',
+                  style='Muted.TLabel', wraplength=990).pack(anchor='w', pady=(2, 10))
+        route = ttk.Frame(tab, style='Toolbar.TFrame', padding=(10, 6))
+        route.pack(fill='x')
+        ttk.Label(route, text='01  WINDOWS AUDIO SOURCE      →      02  PARTYUP RECEIVERS',
+                  style='ToolbarMuted.TLabel').pack(side='left')
+        ttk.Label(route, textvariable=self.group_status, style='GroupState.TLabel').pack(side='right')
         top = ttk.Frame(tab)
         top.pack(fill='x', pady=10)
         ttk.Label(top, text='Main speaker').pack(side='left', padx=(0, 8))
         self.host_combo = self.register(ttk.Combobox(top, state='readonly', width=42), state='readonly')
         self.host_combo.pack(side='left')
         self.host_combo.bind('<<ComboboxSelected>>', self.host_changed)
-        ttk.Label(top, textvariable=self.group_count).pack(side='left', padx=16)
+        ttk.Label(top, textvariable=self.group_count, style='Count.TLabel').pack(side='left', padx=16)
         body = ttk.Frame(tab)
         body.pack(fill='both', expand=True)
         available = ttk.LabelFrame(body, text='Available paired speakers', padding=8)
         available.pack(side='left', fill='both', padx=(0, 12))
         self.guest_list = self.register(tk.Listbox(available, selectmode='multiple', exportselection=False,
                                                  height=12, width=33, font=('Segoe UI', 10)))
-        self.guest_list.pack(fill='both', expand=True)
+        self.guest_list.configure(bg=INPUT, fg=INK, selectbackground='#286A60',
+                                  selectforeground='#FFFFFF', borderwidth=0,
+                                  relief='flat', highlightthickness=1,
+                                  highlightbackground=BORDER, highlightcolor=ACCENT,
+                                  activestyle='none')
+        self.guest_list.pack(fill='both', expand=True, padx=2, pady=3)
         self.guest_list.bind('<<ListboxSelect>>', self.guests_changed)
         ttk.Label(available, text='Click a speaker to select or deselect it.\nSelections are remembered locally.',
                   wraplength=285).pack(anchor='w', pady=(7, 0))
@@ -170,11 +233,14 @@ class PartyUpApp:
                                   ('state', 'Last confirmed result', 240), ('battery', 'Battery', 100)]:
             self.member_tree.heading(key, text=label)
             self.member_tree.column(key, width=width, minwidth=45, stretch=key != 'role')
+        self.member_tree.tag_configure('confirmed', foreground=ACCENT)
+        self.member_tree.tag_configure('uncertain', foreground='#E8B76B')
         self.member_tree.pack(fill='both', expand=True)
         self.member_tree.bind('<<TreeviewSelect>>', self.member_selected)
         self.member_detail = tk.StringVar(value='Select a member to see its detailed result.')
         ttk.Label(members, textvariable=self.member_detail, wraplength=650).pack(anchor='w', pady=8)
-        self.button(members, 'Remove selected members', lambda: self.group_action('remove', from_members=True)).pack(anchor='w')
+        self.button(members, 'Remove selected members', lambda: self.group_action('remove', from_members=True),
+                    variant='Quiet.TButton').pack(anchor='w')
         channel_row = ttk.Frame(members)
         channel_row.pack(fill='x', pady=(8, 0))
         ttk.Label(channel_row, text='Selected guest channel:').pack(side='left')
@@ -184,16 +250,23 @@ class PartyUpApp:
         self.channel_combo.pack(side='left', padx=6)
         self.channel_button = self.button(channel_row, 'Apply channel', self.apply_channel)
         self.channel_button.pack(side='left')
-        actions = ttk.Frame(tab)
-        actions.pack(fill='x', pady=(12, 0))
+        # Critical controls stay visible even when the receiver list scrolls.
+        actions = ttk.Frame(self.tab_viewports['Group'].footer, style='Toolbar.TFrame',
+                            padding=(14, 8))
+        actions.pack(fill='x')
         for label, action in [('Start PartyUp', 'start'), ('Add selected guests', 'add'),
                               ('Check group', 'status'), ('Stop PartyUp', 'stop')]:
-            self.button(actions, label, lambda action=action: self.group_action(action)).pack(side='left', padx=(0, 8))
+            variant = {'start': 'Primary.TButton', 'stop': 'Danger.TButton',
+                       'status': 'Quiet.TButton'}.get(action)
+            self.button(actions, label, lambda action=action: self.group_action(action),
+                        variant=variant).pack(side='left', padx=(0, 8))
         ttk.Label(tab, text='A successful write is shown separately from a receiver report. Confirm playback by listening. '
                   'Older models are experimental until tested on the exact hardware.', wraplength=995).pack(anchor='w', pady=(10, 0))
 
     def build_device(self, tab):
-        ttk.Label(tab, textvariable=self.device_summary, wraplength=995).pack(anchor='w', pady=(0, 12))
+        ttk.Label(tab, text='SPEAKER CONTROL', style='Section.TLabel').pack(anchor='w')
+        ttk.Label(tab, textvariable=self.device_summary, style='Muted.TLabel',
+                  wraplength=995).pack(anchor='w', pady=(4, 14))
         name = ttk.LabelFrame(tab, text='Speaker name', padding=10)
         name.pack(fill='x', pady=(0, 10))
         self.name_entry = self.register(ttk.Entry(name, width=40), 'name')
@@ -206,7 +279,8 @@ class PartyUpApp:
         self.button(battery, 'Announce battery', lambda: self.setting('announce_battery'), 'announce_battery').pack(side='left', padx=(0, 8))
         self.register(ttk.Checkbutton(battery, text='Silent', variable=self.silent_power), 'silent_power').pack(side='left', padx=(0, 8))
         self.button(battery, 'Power off', lambda: self.setting('power_off',
-                    silent=self.silent_power.get() and not self.selected_snapshot.get('experimental', False)), 'power').pack(side='left')
+                    silent=self.silent_power.get() and not self.selected_snapshot.get('experimental', False)),
+                    'power', variant='Danger.TButton').pack(side='left')
         behavior = ttk.LabelFrame(tab, text='Speaker behavior', padding=10)
         behavior.pack(fill='x', pady=(0, 10))
         remote = self.register(ttk.Checkbutton(behavior, text='Remote activation', variable=self.remote_activation), 'remote_activation')
@@ -240,6 +314,9 @@ class PartyUpApp:
                   'Power off affects the selected speaker immediately.', wraplength=995).pack(anchor='w', pady=5)
 
     def build_sound(self, tab):
+        ttk.Label(tab, text='SOUND & EQUALIZER', style='Section.TLabel').pack(anchor='w')
+        ttk.Label(tab, text='Tune the selected speaker. Move sliders freely; only Apply sends a command.',
+                  style='Muted.TLabel').pack(anchor='w', pady=(3, 14))
         volume = ttk.LabelFrame(tab, text='Speaker volume', padding=10)
         volume.pack(fill='x', pady=(0, 10))
         self.volume_scale = self.register(ttk.Scale(volume, from_=0, to=31, variable=self.volume), 'volume')
@@ -276,7 +353,9 @@ class PartyUpApp:
         ttk.Label(tab, text='Custom EQ bands use the speaker’s raw levels; these values are not decibels.', wraplength=995).pack(anchor='w')
 
     def build_partyup(self, tab):
-        ttk.Label(tab, text='These controls apply to the speaker selected in “Speaker controls” above.', wraplength=995).pack(anchor='w', pady=(0, 10))
+        ttk.Label(tab, text='PARTYUP OPTIONS', style='Section.TLabel').pack(anchor='w')
+        ttk.Label(tab, text='These options apply only to the selected control target. Unsupported features stay unavailable.',
+                  style='Muted.TLabel', wraplength=995).pack(anchor='w', pady=(3, 14))
         general = ttk.LabelFrame(tab, text='Group preferences', padding=10)
         general.pack(fill='x', pady=(0, 10))
         self.register(ttk.Checkbutton(general, text='Remember PartyUp group', variable=self.sticky), 'sticky').pack(side='left')
@@ -403,6 +482,7 @@ class PartyUpApp:
     def clear_group_results(self):
         self.member_tree.delete(*self.member_tree.get_children())
         self.member_speakers = {}
+        self.group_status.set('STATUS NOT CHECKED')
         self.member_detail.set('Check group to load results for the selected main speaker.')
         self.update_enabled()
 
@@ -653,6 +733,7 @@ class PartyUpApp:
         # Refresh can choose a new main when the remembered device disappeared.
         self.clear_group_results()
         self.speakers, self.radios = speakers, radios
+        self.device_count.set(f'{len(speakers)} PAIRED RECORDS')
         values = [speaker.label + (' · experimental' if speaker.experimental else '') for speaker in speakers]
         for combo in (self.host_combo, self.device_combo):
             combo.configure(values=values)
@@ -676,6 +757,8 @@ class PartyUpApp:
         self.member_tree.delete(*self.member_tree.get_children())
         self.member_speakers = {}
         state = 'PartyUp enabled' if result.host_on else 'PartyUp off' if result.host_on is False else 'State unconfirmed'
+        self.group_status.set('BROADCAST ON' if result.host_on else 'BROADCAST OFF'
+                              if result.host_on is False else 'STATE UNKNOWN')
         host_detail = next((member.detail for member in result.members if member.speaker.address == host.address and member.detail),
                            'Windows audio should play through this speaker.')
         rows = [(host, 'Main', state, host_detail)]
@@ -683,7 +766,10 @@ class PartyUpApp:
         for speaker, role, member_state, detail in rows:
             key = str(speaker.address)
             battery = format_value(self.snapshots.get(speaker.address, {}).get('battery'))
-            self.member_tree.insert('', 'end', iid=key, values=(role, speaker.label, member_state, battery), tags=(detail or member_state,))
+            confirmed = (member_state == 'PartyUp enabled' or member_state == 'reported by main speaker')
+            tag = 'confirmed' if confirmed else 'uncertain'
+            self.member_tree.insert('', 'end', iid=key, values=(role, speaker.label, member_state, battery),
+                                    tags=(detail or member_state, tag))
             self.member_speakers[key] = speaker
         self.status.set(str(result).split('\n')[0])
         self.append_log(str(result))
