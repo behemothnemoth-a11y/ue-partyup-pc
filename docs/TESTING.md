@@ -58,3 +58,19 @@ Recovered the uncommitted private v0.2.0 checkout after a session usage cutoff, 
 - No live Bluetooth mutations, speaker stop/restart, audio playback tests, firmware operations or changes to unrelated services were performed in this recovery stage.
 
 These are software regression and UI construction checks, **not** an acceptance result for additional hardware models, multiple real guests or live control writes. Next bounded acceptance stage: exercise GUI discovery, selection persistence, read-only group status and supported speaker-control readback on the owner's EVERBOOM pair. A GUI Start/Stop/Restart and audible confirmation test should be separately announced before changing playback.
+
+## 2026-10-14 v0.2.0 read-only live check on MSI
+
+Launched the existing native UI with the approved project Python/Bluetooth environment. Its window was observed visible and responsive, showing both paired EVERBOOMs, one saved main speaker and one selected guest. A screenshot was inspected locally; no screenshot or device identity is being committed.
+
+A separate one-shot read-only diagnostic in the Codex work area used the same `discover()`, `GroupManager.run('status')` and `Settings.snapshot()` code paths as the UI. The following values were observed:
+
+- Two supported paired EVERBOOM records and one local Bluetooth adapter; both saved speaker choices matched discovery.
+- **Group status:** completed in 8.8 seconds; main speaker reported PartyUp enabled, one receiver matched the saved guest, with zero warnings. This is receiver-list confirmation, **not** independent listening confirmation.
+- **Main speaker readback:** completed in 46.3 seconds. Name, battery, volume, EQ and advertised presets, sleep timer, remote activation, sticky group and public visibility returned values. Outdoor mode had no usable value; Apollo stereo-balance readback remains intentionally undecoded.
+- **Guest speaker readback:** completed in 17.5 seconds, but none of the displayed settings getters yielded a usable value. Some feature lookups were positive, others negative or unknown. Do not interpret unknown values as unsupported controls or claim the guest cannot play audio.
+- The UI activity log had also shown a successful group-state report and an intermittent WinSock/Bluetooth connection timeout 10060 on a later attempt. Connection reliability remains an acceptance concern.
+
+This pass sent **no PartyUp Start/Stop, BLE join/leave, power, volume, EQ, channel, firmware or other settings-mutation request**. No new audible playback or stop-silence result is claimed. The fully interactive GUI button flow was not systematically certified by the independent read-only runner; continue to distinguish backend readback from GUI usability. Do not attempt a disruptive group restart without announcing it first.
+
+Next: reproduce and characterize guest-control readback limits and sporadic connection timeouts using read-only, bounded requests; then run owner-observed GUI control actions and listening acceptance in a separate stage.
