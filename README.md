@@ -2,7 +2,7 @@
 
 Independent Windows desktop controller for Ultimate Ears PartyUp, with one main speaker and up to nine guests.
 
-**Private preview, version 0.2.1.** Two EVERBOOMs have been tested with PC audio and a Start → Stop → Start cycle in the earlier controller. The expanded ten-speaker workflow, new controls and older-speaker adapter have automated tests; physical acceptance remains model- and control-specific. The repository stays private until the owner approves publication. Not affiliated with Logitech or Ultimate Ears.
+**Private preview, version 0.2.2.** Two EVERBOOMs have been tested with PC audio and a Start → Stop → Start cycle in the earlier controller. The expanded ten-speaker workflow, new controls and older-speaker adapter have automated tests; physical acceptance remains model- and control-specific. The repository stays private until the owner approves publication. Not affiliated with Logitech or Ultimate Ears.
 
 ## Use
 
@@ -28,7 +28,7 @@ All UI styling lives in `ue_partyup/theme.py` and can be changed without alterin
 
 ## Controls
 
-The desktop has separate group, speaker, sound and PartyUp tabs. Read a speaker's controls first; supported features enable the corresponding controls. Available implementations include volume, battery readout, renaming, advertised EQ presets and five custom bands, outdoor mode, remote activation setting, power off, playback commands, persistent PartyUp, identification, group volume sync and source-backed channel assignment. Some model-specific units or readbacks remain unresolved and are labelled accordingly.
+The desktop has separate group, speaker, sound and PartyUp tabs. Opening Sound triggers a bounded, read-only check for volume and EQ on the selected supported speaker, without requiring a full settings scan. Drag and release the volume slider to send one level change (0–31 on modern CPP devices), then confirm the result by readback. Dragging a supported Custom EQ band selects the advertised Custom preset and applies on release; other EQ presets use Apply EQ. Unsupported or unconfirmed controls stay disabled. Use Read controls for other speaker settings and for manual retries. Available implementations include volume, battery readout, renaming, advertised EQ presets and five custom bands, outdoor mode, remote activation setting, power off, playback commands, persistent PartyUp, identification, group volume sync and source-backed channel assignment. Some model-specific units or readbacks remain unresolved and are labelled accordingly.
 
 Older BOOM and MEGABOOM speakers use an explicitly enabled experimental adapter. Protocol and identity queries must succeed before writes. Basic legacy controls include name, 16/32-step volume, sticky/public PartyUp, battery announcement, power off, and group operations. Marketing names alone do not choose a protocol; BOOM 3 has both legacy and CPP revisions in the current app.
 

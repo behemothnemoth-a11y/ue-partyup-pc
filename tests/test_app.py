@@ -4,7 +4,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
+from types import SimpleNamespace
 from ue_partyup.app import PartyUpApp, load_selection, parse_mac, format_value
 from ue_partyup.controller import Speaker
 from ue_partyup.settings import BatteryInfo, EQInfo
@@ -165,6 +166,189 @@ class AppTests(unittest.TestCase):
         self.assertFalse(self.app.volume_scale.instate(['disabled']))
         self.assertEqual(float(self.app.volume_scale.cget('to')), 31)
         self.assertEqual(self.app.volume_text.get(), '29%')
+
+    def test_sound_tab_loads_controls_once_without_mutation(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.assertNotIn(speaker.address, self.app.snapshots)
+        with patch.object(self.app, 'read_sound_controls') as read:
+            self.app.notebook.select(self.app.tab_viewports['Sound'])
+            self.app.on_tab_changed()
+            self.app.on_tab_changed()
+        read.assert_called_once()
+        self.assertIn(speaker.address, self.app.sound_requested)
+
+    def test_volume_release_commits_once_only_when_changed(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {
+            'capabilities': {'volume': True}, 'volume': 9, 'max_volume': 31, 'errors': {}})
+        with patch.object(self.app, 'setting') as setting:
+            self.app.on_volume_release()
+            setting.assert_not_called()
+            self.app.volume.set(14.3)
+            self.assertIn('pending', self.app.volume_text.get())
+            self.app.on_volume_release()
+        setting.assert_called_once_with('set_volume', 14)
+
+    def test_slider_cannot_send_with_unknown_volume(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {
+            'capabilities': {'volume': True}, 'volume': None, 'errors': {}})
+        self.app.volume.set(20)
+        with patch.object(self.app, 'setting') as setting:
+            self.app.on_volume_release()
+            self.app.apply_volume()
+        setting.assert_not_called()
+        self.assertIn('Read controls', self.app.status.get())
+
+    def test_eq_band_release_selects_advertised_custom_not_preset(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {
+            'capabilities': {'eq': True}, 'eq': EQInfo(3, (-5, 0, 1, 2, 3)),
+            'supported_eq_modes': (3, 4), 'errors': {}})
+        self.assertFalse(self.app.eq_band_scales[0].instate(['disabled']))
+        self.app.eq_bands[0].set(-10)
+        with patch.object(self.app, 'setting') as setting:
+            self.app.on_eq_band_release()
+        self.assertEqual(self.app.eq_combo.get(), 'Custom')
+        setting.assert_called_once_with('set_eq', 4, (-10, 0, 1, 2, 3))
+
+    def test_eq_custom_band_sliders_disabled_when_unadvertised(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {
+            'capabilities': {'eq': True}, 'eq': EQInfo(3, (0, 0, 0, 0, 0)),
+            'supported_eq_modes': (3, 5), 'errors': {}})
+        self.assertFalse(self.app.eq_combo.instate(['disabled']))
+        self.assertTrue(all(s.instate(['disabled']) for s in self.app.eq_band_scales))
+        with patch.object(self.app, 'setting') as setting:
+            self.app.on_eq_band_release()
+        setting.assert_not_called()
+        self.assertIn('does not advertise Custom EQ', self.app.status.get())
+
+    def test_volume_setting_queries_only_changed_value(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {
+            'capabilities': {'volume': True}, 'volume': 9, 'max_volume': 31, 'errors': {}})
+        settings = SimpleNamespace(set_volume=AsyncMock(), volume=AsyncMock(return_value=14),
+                                   snapshot=AsyncMock(side_effect=AssertionError('slow scan')))
+        connection = AsyncMock()
+        connection.__aenter__.return_value = settings
+        with patch('ue_partyup.controls.settings_session', return_value=connection):
+            with patch.object(self.app, 'worker') as worker:
+                self.app.setting('set_volume', 14)
+            kind, task = worker.call_args.args
+            speaker_result, field, value, error = task()
+        self.assertEqual(kind, 'adjusted')
+        self.assertEqual((speaker_result, field, value, error), (speaker, 'volume', 14, None))
+        settings.set_volume.assert_awaited_once_with(14)
+        settings.volume.assert_awaited_once()
+        settings.snapshot.assert_not_awaited()
+
+    def test_sound_tab_fast_read_does_not_scan_or_mutate(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        fake = SimpleNamespace(
+            volume=AsyncMock(return_value=9),
+            eq=AsyncMock(return_value=EQInfo(4, (-5, 0, 1, 2, 3))),
+            eq_modes=AsyncMock(return_value=(3, 4)),
+            snapshot=AsyncMock(side_effect=AssertionError('full scan')),
+            set_volume=AsyncMock(), set_eq=AsyncMock())
+        context = AsyncMock()
+        context.__aenter__.return_value = fake
+        with patch('ue_partyup.controls.settings_session', return_value=context):
+            with patch.object(self.app, 'worker') as worker:
+                self.app.read_sound_controls()
+            kind, task = worker.call_args.args
+            chosen, fields = task()
+        self.assertEqual(kind, 'sound_snapshot')
+        self.assertEqual(chosen, speaker)
+        self.assertEqual(fields['volume'], 9)
+        self.assertEqual(fields['capabilities'], {'volume': True, 'eq': True})
+        fake.snapshot.assert_not_awaited()
+        fake.set_volume.assert_not_awaited()
+        fake.set_eq.assert_not_awaited()
+
+    def test_sound_read_timeout_does_not_claim_unsupported(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        fake = SimpleNamespace(
+            volume=AsyncMock(side_effect=RuntimeError('timed out')),
+            eq=AsyncMock(return_value=EQInfo(4, (0, 0, 0, 0, 0))),
+            eq_modes=AsyncMock(return_value=(3, 4)))
+        context = AsyncMock()
+        context.__aenter__.return_value = fake
+        with patch('ue_partyup.controls.settings_session', return_value=context):
+            with patch.object(self.app, 'worker') as worker:
+                self.app.read_sound_controls()
+            _, task = worker.call_args.args
+            _, snapshot = task()
+        self.assertIsNone(snapshot['volume'])
+        self.assertIsNone(snapshot['capabilities']['volume'])
+        self.assertTrue(snapshot['capabilities']['eq'])
+        self.assertIn('volume', snapshot['errors'])
+
+    def test_confirmed_adjustment_updates_without_losing_other_fields(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {
+            'capabilities': {'volume': True, 'battery': True},
+            'battery': BatteryInfo(75, 74, 2), 'volume': 9,
+            'max_volume': 31, 'errors': {}})
+        self.app.events.put(('adjusted', (speaker, 'volume', 14, None)))
+        self.app.poll()
+        current = self.app.snapshots[speaker.address]
+        self.assertEqual(current['volume'], 14)
+        self.assertEqual(current['battery'].percent, 74)
+        self.assertFalse(self.app.volume_scale.instate(['disabled']))
+        self.assertIn('verified', self.app.status.get())
+
+    def test_eq_write_uses_targeted_readback_not_full_snapshot(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {
+            'capabilities': {'eq': True}, 'eq': EQInfo(3, (0, 0, 0, 0, 0)),
+            'supported_eq_modes': (3, 4), 'errors': {}})
+        eq = EQInfo(4, (4, 3, 2, 1, 0))
+        fake = SimpleNamespace(set_eq=AsyncMock(), eq=AsyncMock(return_value=eq),
+                               snapshot=AsyncMock(side_effect=AssertionError('full scan')))
+        context = AsyncMock()
+        context.__aenter__.return_value = fake
+        with patch('ue_partyup.controls.settings_session', return_value=context):
+            with patch.object(self.app, 'worker') as worker:
+                self.app.setting('set_eq', 4, eq.bands)
+            kind, task = worker.call_args.args
+            _, field, value, error = task()
+        self.assertEqual((kind, field, value, error), ('adjusted', 'eq', eq, None))
+        fake.set_eq.assert_awaited_once_with(4, eq.bands)
+        fake.eq.assert_awaited_once()
+        fake.snapshot.assert_not_awaited()
+
+    def test_ack_without_readback_does_not_claim_volume_verified(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        snapshot = {'capabilities': {'volume': True}, 'volume': 9, 'max_volume': 31, 'errors': {}}
+        self.app.render_snapshot(speaker, snapshot)
+        self.app.events.put(('adjusted', (speaker, 'volume', None, 'timeout')))
+        self.app.poll()
+        self.assertIsNone(self.app.snapshots[speaker.address]['volume'])
+        self.assertTrue(self.app.volume_scale.instate(['disabled']))
+        self.assertIn('unconfirmed', self.app.status.get())
+
+    def test_busy_volume_release_does_not_send(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {
+            'capabilities': {'volume': True}, 'volume': 9, 'max_volume': 31, 'errors': {}})
+        self.app.volume.set(12)
+        self.app.busy = True
+        with patch.object(self.app, 'setting') as setting:
+            self.app.on_volume_release()
+        setting.assert_not_called()
 
     def test_busy_close_is_guarded(self):
         self.app.busy = True

@@ -73,6 +73,9 @@ class PartyUpApp:
         self.radios = []
         self.selected_snapshot = {}
         self.eq_choices = []
+        self.eq_band_scales = []
+        self.sound_requested = set()
+        self.sound_hint = tk.StringVar(value='Open Sound to read controls for the selected speaker.')
         self.controls = []
         self.feature_widgets = {}
         self.status = tk.StringVar(value='Find paired speakers to begin.')
@@ -150,6 +153,7 @@ class PartyUpApp:
         self.build_device(tabs['Speaker'])
         self.build_sound(tabs['Sound'])
         self.build_partyup(tabs['PartyUp settings'])
+        self.notebook.bind('<<NotebookTabChanged>>', self.on_tab_changed)
         for viewport in self.tab_viewports.values():
             viewport.enable_wheel()
 
@@ -315,16 +319,20 @@ class PartyUpApp:
 
     def build_sound(self, tab):
         ttk.Label(tab, text='SOUND & EQUALIZER', style='Section.TLabel').pack(anchor='w')
-        ttk.Label(tab, text='Tune the selected speaker. Move sliders freely; only Apply sends a command.',
-                  style='Muted.TLabel').pack(anchor='w', pady=(3, 14))
+        ttk.Label(tab, text='Volume sends one change when you release the slider. Custom EQ bands apply on release.',
+                  style='Muted.TLabel').pack(anchor='w', pady=(3, 5))
+        ttk.Label(tab, textvariable=self.sound_hint, style='Micro.TLabel',
+                  wraplength=955).pack(anchor='w', pady=(0, 13))
         volume = ttk.LabelFrame(tab, text='Speaker volume', padding=10)
         volume.pack(fill='x', pady=(0, 10))
         self.volume_scale = self.register(ttk.Scale(volume, from_=0, to=31, variable=self.volume), 'volume')
         self.volume_scale.pack(side='left', fill='x', expand=True, padx=(0, 10))
+        self.volume_scale.bind('<ButtonRelease-1>', self.on_volume_release)
+        self.volume_scale.bind('<KeyRelease>', self.on_volume_release)
         self.volume_text = tk.StringVar(value='Unknown')
-        ttk.Label(volume, textvariable=self.volume_text, width=12).pack(side='left')
+        ttk.Label(volume, textvariable=self.volume_text, width=19).pack(side='left')
         self.volume.trace_add('write', lambda *_: self.update_volume_label())
-        self.button(volume, 'Apply volume', self.apply_volume, 'volume').pack(side='left')
+        self.button(volume, 'Set volume', self.apply_volume, 'volume').pack(side='left')
         eq = ttk.LabelFrame(tab, text='EQ preset and custom EQ', padding=10)
         eq.pack(fill='x', pady=(0, 10))
         top = ttk.Frame(eq)
@@ -339,8 +347,12 @@ class PartyUpApp:
             box = ttk.Frame(bands)
             box.pack(side='left', fill='x', expand=True, padx=6)
             ttk.Label(box, text=f'Band {number}').pack()
-            scale = self.register(ttk.Scale(box, from_=127, to=-128, orient='vertical', variable=value), 'eq')
+            scale = self.register(ttk.Scale(box, from_=127, to=-128,
+                                            orient='vertical', variable=value), 'eq_band')
             scale.pack()
+            scale.bind('<ButtonRelease-1>', self.on_eq_band_release)
+            scale.bind('<KeyRelease>', self.on_eq_band_release)
+            self.eq_band_scales.append(scale)
             label = tk.StringVar(value='0')
             value.trace_add('write', lambda *_, value=value, label=label: label.set(str(round(value.get()))))
             ttk.Label(box, textvariable=label).pack()
@@ -348,8 +360,9 @@ class PartyUpApp:
         outdoor.pack(fill='x')
         self.register(ttk.Checkbutton(outdoor, text='Outdoor mode', variable=self.outdoor), 'outdoor').pack(side='left')
         self.button(outdoor, 'Apply outdoor mode', lambda: self.setting('set_outdoor', self.outdoor.get()), 'outdoor').pack(side='left', padx=10)
-        ttk.Label(tab, text='Moving a slider changes its pending value. Apply sends one setting, then reads the speaker back.',
-                  wraplength=995).pack(anchor='w', pady=10)
+        ttk.Label(tab, text='Release the volume or Custom EQ sliders to send one change, then verify it by readback. '
+                  'Presets use Apply EQ. Bluetooth commands may take a few seconds.',
+                  style='Muted.TLabel', wraplength=995).pack(anchor='w', pady=10)
         ttk.Label(tab, text='Custom EQ bands use the speaker’s raw levels; these values are not decibels.', wraplength=995).pack(anchor='w')
 
     def build_partyup(self, tab):
@@ -501,6 +514,30 @@ class PartyUpApp:
             return
         self.selected_snapshot = self.snapshots.get(speaker.address, {})
         self.render_snapshot(speaker, self.selected_snapshot)
+        self.maybe_load_sound_controls()
+
+    def on_tab_changed(self, _=None):
+        self.maybe_load_sound_controls()
+
+    def maybe_load_sound_controls(self):
+        # A tab switch initiates only read-only queries; never mutate on opening.
+        if self.busy or self.notebook.select() != str(self.tab_viewports['Sound']):
+            return
+        try:
+            speaker = self.selected_device()
+        except ValueError:
+            self.sound_hint.set('Find and select a speaker first.')
+            return
+        if speaker.experimental:
+            self.sound_hint.set('Experimental older speakers require manual Read controls.')
+            return
+        if speaker.address in self.snapshots and self.snapshots[speaker.address]:
+            return
+        if speaker.address in self.sound_requested:
+            return  # Do not hammer an unreachable speaker on every tab switch.
+        self.sound_requested.add(speaker.address)
+        self.sound_hint.set('Reading volume and EQ only… No settings will change.')
+        self.read_sound_controls()
 
     def member_selected(self, _=None):
         selected = self.member_tree.selection()
@@ -557,6 +594,42 @@ class PartyUpApp:
         except ValueError as exc:
             self.status.set(str(exc))
 
+    def read_sound_controls(self):
+        # Startup of Sound should not require the whole (slow) settings inventory.
+        try:
+            speaker = self.selected_device()
+            if speaker.experimental:
+                self.sound_hint.set('Use Read controls for experimental speaker capabilities.')
+                return
+            async def inspect():
+                from .controls import settings_session
+                from .session import UnsupportedFeature
+                async with settings_session(speaker) as settings:
+                    readout = {'capabilities': {}, 'errors': {}, 'max_volume': 31}
+                    getters = {'volume': settings.volume, 'eq': settings.eq,
+                               'supported_eq_modes': settings.eq_modes}
+                    missing = {}
+                    for field, getter in getters.items():
+                        try:
+                            readout[field] = await getter()
+                        except Exception as error:
+                            readout[field] = None
+                            missing[field] = error
+                            readout['errors'][field] = str(error)
+                    # A timeout means UNKNOWN, not unsupported. Only a concrete
+                    # feature rejection makes the capability False.
+                    readout['capabilities'] = {
+                        'volume': (True if readout['volume'] is not None else
+                                   False if isinstance(missing.get('volume'), UnsupportedFeature) else None),
+                        'eq': (True if readout['eq'] is not None and readout['supported_eq_modes'] is not None
+                               else False if any(isinstance(missing.get(key), UnsupportedFeature)
+                                                 for key in ('eq', 'supported_eq_modes')) else None)}
+                    return speaker, readout
+            self.status.set(f'Reading volume and EQ from {speaker.label}…')
+            self.worker('sound_snapshot', lambda: asyncio.run(inspect()))
+        except ValueError as error:
+            self.status.set(str(error))
+
     def setting(self, method, *args, **kwargs):
         try:
             speaker, experimental = self.selected_device(), self.experimental.get()
@@ -570,8 +643,18 @@ class PartyUpApp:
                     await getattr(settings, method)(*args, **kwargs)
                     if method == 'power_off':
                         return speaker, {'powered_off': True, 'capabilities': {}, 'errors': {}}
+                    if method in ('set_volume', 'set_eq'):
+                        # Only re-read the changed field. The old full snapshot ran
+                        # many slow unrelated queries and obscured working sliders.
+                        field = 'volume' if method == 'set_volume' else 'eq'
+                        try:
+                            confirmed = await getattr(settings, field)()
+                        except Exception as error:
+                            return speaker, field, None, str(error)
+                        return speaker, field, confirmed, None
                     return speaker, await settings.snapshot()
-            self.worker('snapshot', lambda: asyncio.run(apply()))
+            event = 'adjusted' if method in ('set_volume', 'set_eq') else 'snapshot'
+            self.worker(event, lambda: asyncio.run(apply()))
         except ValueError as exc:
             self.status.set(str(exc))
 
@@ -582,25 +665,70 @@ class PartyUpApp:
             return
         self.setting('set_sleep_timer', self.sleep_choices[index][1])
 
+    def on_volume_release(self, _=None):
+        # Tk's button/key release is one user gesture, not dozens of writes
+        # generated while dragging a 0–31 scale.
+        if not self.busy and not self.volume_scale.instate(['disabled']):
+            self.apply_volume()
+
     def apply_volume(self):
+        if self.busy:
+            return
+        if self.volume_scale.instate(['disabled']):
+            self.status.set('Read controls from this speaker before changing volume.')
+            return
         try:
-            self.setting('set_volume', round(self.volume.get()))
+            target = round(self.volume.get())
+            if target == self.selected_snapshot.get('volume'):
+                return  # Clicking the thumb or pressing a non-arrow key is harmless.
+            self.setting('set_volume', target)
         except (ValueError, tk.TclError):
             self.status.set('Enter a whole-number volume level.')
 
     def update_volume_label(self):
         maximum = self.selected_snapshot.get('max_volume')
-        if self.selected_snapshot.get('volume') is None or not isinstance(maximum, (int, float)) or maximum <= 0:
-            self.volume_text.set('Unknown')
+        current = self.selected_snapshot.get('volume')
+        if current is None or not isinstance(maximum, (int, float)) or maximum <= 0:
+            self.volume_text.set('Not read')
         else:
-            self.volume_text.set(f'{round(self.volume.get() * 100 / maximum)}%')
+            target = round(self.volume.get())
+            percent = round(target * 100 / maximum)
+            self.volume_text.set(f'{percent}% · pending' if target != current else f'{percent}%')
+
+    def on_eq_band_release(self, event=None):
+        if self.busy or (event is not None and event.widget.instate(['disabled'])):
+            return
+        if not self.selected_snapshot.get('eq'):
+            return
+        # Custom is an actual advertised wire code, never a guessed enum index.
+        custom = next((i for i, (_, code) in enumerate(self.eq_choices) if code == 4), None)
+        if custom is None:
+            self.status.set('This speaker does not advertise Custom EQ.')
+            return
+        self.eq_combo.current(custom)
+        self.apply_eq()
 
     def apply_eq(self):
+        if self.busy:
+            return
+        if self.eq_combo.instate(['disabled']):
+            self.status.set('Read supported EQ controls before changing them.')
+            return
         index = self.eq_combo.current()
         if not 0 <= index < len(self.eq_choices):
             self.status.set('Choose a supported EQ preset first.')
             return
-        self.setting('set_eq', self.eq_choices[index][1], tuple(round(value.get()) for value in self.eq_bands))
+        mode = self.eq_choices[index][1]
+        bands = tuple(round(value.get()) for value in self.eq_bands)
+        previous = self.selected_snapshot.get('eq')
+        if previous is None:
+            self.status.set('EQ readback is unavailable. No EQ command sent.')
+            return
+        prev_mode = previous.get('mode') if isinstance(previous, dict) else getattr(previous, 'mode', None)
+        prev_bands = previous.get('bands') if isinstance(previous, dict) else getattr(previous, 'bands', ())
+        if mode == prev_mode and bands == tuple(prev_bands):
+            return
+        self.setting('set_eq', mode, bands)
 
     def source_address(self):
         selected = self.source_combo.current()
@@ -647,6 +775,9 @@ class PartyUpApp:
                     available = False
             if feature == 'eq' and not self.eq_choices:
                 available = False
+            if feature == 'eq_band':
+                available = bool(capabilities.get('eq')) and self.selected_snapshot.get('eq') is not None
+                available = available and any(code == 4 for _, code in self.eq_choices)
             for widget in widgets:
                 if not available:
                     self.set_widget_state(widget, 'disabled')
@@ -668,6 +799,20 @@ class PartyUpApp:
 
     def render_snapshot(self, speaker, snapshot):
         self.selected_snapshot = snapshot
+        if snapshot:
+            self.snapshots[speaker.address] = snapshot
+        volume_ready = snapshot.get('volume') is not None
+        eq_ready = (snapshot.get('eq') is not None and snapshot.get('supported_eq_modes') is not None)
+        if not snapshot:
+            self.sound_hint.set('Opening Sound reads available controls. The selected speaker must respond.')
+        elif not volume_ready and not eq_ready:
+            self.sound_hint.set('No volume or EQ readback. Check power, Bluetooth connection and try Read controls.')
+        elif volume_ready and eq_ready:
+            self.sound_hint.set('Volume and advertised EQ controls loaded. Release a slider to apply one change.')
+        elif volume_ready:
+            self.sound_hint.set('Volume loaded; EQ is unavailable. Use Read controls to try again.')
+        else:
+            self.sound_hint.set('EQ loaded; volume is unavailable. Use Read controls to try again.')
         if snapshot.get('powered_off'):
             self.device_summary.set(f'{speaker.label}: power command accepted. Read again after powering it on.')
             self.battery_label.set('Not available while powered off.')
@@ -733,6 +878,8 @@ class PartyUpApp:
         # Refresh can choose a new main when the remembered device disappeared.
         self.clear_group_results()
         self.speakers, self.radios = speakers, radios
+        self.snapshots.clear()  # A new discovery invalidates previously read capabilities.
+        self.sound_requested.clear()
         self.device_count.set(f'{len(speakers)} PAIRED RECORDS')
         values = [speaker.label + (' · experimental' if speaker.experimental else '') for speaker in speakers]
         for combo in (self.host_combo, self.device_combo):
@@ -796,6 +943,35 @@ class PartyUpApp:
                 elif kind == 'message':
                     self.status.set(str(result) if result else 'Channel command accepted; confirm playback by listening.')
                     self.append_log(self.status.get())
+                elif kind == 'sound_snapshot':
+                    speaker, snapshot = result
+                    self.snapshots[speaker.address] = snapshot
+                    if self.selected_device().address == speaker.address:
+                        self.render_snapshot(speaker, snapshot)
+                    ready = [field for field in ('volume', 'eq') if snapshot.get(field) is not None]
+                    label = ', '.join(ready) if ready else 'none'
+                    message = f'{speaker.label}: sound controls read. Available: {label}.'
+                    self.status.set(message)
+                    self.append_log(message)
+                    for field, error in snapshot.get('errors', {}).items():
+                        self.append_log(f'{field}: {error}')
+                elif kind == 'adjusted':
+                    speaker, field, confirmed, problem = result
+                    snapshot = dict(self.snapshots.get(speaker.address, self.selected_snapshot))
+                    errors = dict(snapshot.get('errors', {}))
+                    snapshot[field] = confirmed
+                    if problem:
+                        errors[field] = f'Write accepted but readback unavailable: {problem}'
+                        message = f'{field.upper()} change accepted; current value unconfirmed. Read controls to retry.'
+                    else:
+                        errors.pop(field, None)
+                        message = f'{speaker.label}: {field.upper()} change verified by speaker readback.'
+                    snapshot['errors'] = errors
+                    self.snapshots[speaker.address] = snapshot
+                    if self.selected_device().address == speaker.address:
+                        self.render_snapshot(speaker, snapshot)
+                    self.status.set(message)
+                    self.append_log(message)
                 elif kind == 'snapshot':
                     speaker, snapshot = result
                     self.snapshots[speaker.address] = snapshot
