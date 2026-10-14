@@ -6,12 +6,13 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from pathlib import Path
 from .controller import control,discover
+from . import __version__
 
 DATA=Path(__file__).resolve().parents[1]/'data'
 
 def main(smoke=False):
     root=tk.Tk()
-    root.title('UE PartyUp PC — private preview')
+    root.title(f'UE PartyUp PC {__version__} — private preview')
     root.geometry('680x460')
     root.minsize(600,440)
     panel=ttk.Frame(root,padding=24)

@@ -2,7 +2,7 @@
 
 Independent Windows desktop controller for grouping two Ultimate Ears EVERBOOM speakers without a phone during normal use.
 
-**Private preview, version 0.1.0.** A PC-created group has been verified with audible playback on one pair of EVERBOOMs. The refactored application's complete stop/restart flow still needs hardware acceptance testing. No other UE model is supported yet. Not affiliated with or endorsed by Logitech or Ultimate Ears.
+**Private preview, version 0.1.1.** The controller completed Start → Stop → Start on one pair of EVERBOOMs, with state checks after every action and user-confirmed audio from both speakers after restart. Full interface acceptance, swapped-host and failure-case hardware checks remain pending. No other UE model is supported yet. Not affiliated with or endorsed by Logitech or Ultimate Ears.
 
 ## Use
 

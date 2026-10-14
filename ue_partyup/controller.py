@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 from bleak import BleakClient
-from .everboom_protocol import Everboom
+from .everboom_protocol import Everboom,RequestIds
 from .test_connection import targets
 
 GROUP_UUID='69c0f621-1354-4cf8-98a6-328b8faa1897'
@@ -38,17 +38,23 @@ async def control(action,host,guest,progress=lambda message:None):
                 raise RuntimeError('Main speaker connection timed out. Keep it on, close the phone app, and check that the selected speaker is your audio source.') from None
             progress('Main speaker did not connect. Retrying once…')
             await asyncio.sleep(2)
-    async def request(cat,op,seq,payload=b'',seconds=2):
-        return await asyncio.to_thread(speaker.request,cat,op,seq,payload,seconds)
+    ids=RequestIds()
+    async def request(cat,op,payload=b'',seconds=2):
+        for attempt in range(2):
+            seq=ids.next()
+            frames=await asyncio.to_thread(speaker.request,cat,op,seq,payload,seconds)
+            matches=matching(frames,cat,op,seq)
+            if matches:
+                return frames,seq
+            if op!=1 and not (cat==0 and op==0):
+                break  # Never retry a possibly accepted mutation blindly.
+        return frames,seq
     try:
-        frames=await request(0,0,1,b'\0\1')
-        if not matching(frames,0,0,1):
-            progress('Waiting for the speaker control session…')
-            frames=await request(0,0,1,b'\0\1')
-        if not matching(frames,0,0,1):
+        frames,seq=await request(0,0,b'\0\1')
+        if not matching(frames,0,0,seq):
             raise RuntimeError('The main speaker did not respond. Close the phone app and retry.')
-        frames=await request(11,1,9)
-        states=matching(frames,11,1,9)
+        frames,seq=await request(11,1)
+        states=matching(frames,11,1,seq)
         if not states or len(states[-1])<10:
             raise RuntimeError('The speaker did not return its PartyUp state.')
         prior=states[-1][6:8]
@@ -56,8 +62,8 @@ async def control(action,host,guest,progress=lambda message:None):
             return f'Main speaker: {"PartyUp off" if prior[0]==0 else "PartyUp enabled"}. State {prior[0]}; audio mode {prior[1]}. This does not verify guest playback.'
         progress('Starting the group…' if action=='start' else 'Stopping the group…')
         payload=b'\3\0' if action=='start' else b'\0\0'
-        frames=await request(11,0,15,payload)
-        if not acknowledged(frames,11,0,15):
+        frames,seq=await request(11,0,payload)
+        if not acknowledged(frames,11,0,seq):
             raise RuntimeError('No successful acknowledgement of the group command.')
         mac=':'.join(f'{b:02X}' for b in guest.address.to_bytes(6,'big'))
         progress('Connecting to the second speaker…')
@@ -69,14 +75,15 @@ async def control(action,host,guest,progress=lambda message:None):
             # Restore prior host state if guest operation failed; report rollback failures honestly.
             restored=False
             try:
-                restored=acknowledged(await request(11,0,14,prior),11,0,14)
+                rollback,seq=await request(11,0,prior)
+                restored=acknowledged(rollback,11,0,seq)
             except Exception:
                 pass
             raise RuntimeError('Second speaker connection/write failed. '+
                                ('Previous host state restored.' if restored else 'Host may be partially configured; check status.')) from None
         if action=='stop':
-            frames=await request(11,1,8)
-            states=matching(frames,11,1,8)
+            frames,seq=await request(11,1)
+            states=matching(frames,11,1,seq)
             if not states or states[-1][6]!=0:
                 raise RuntimeError('Stop writes accepted, but host off-state was not verified.')
             return 'PartyUp stopped. Main speaker reports broadcasting off.'

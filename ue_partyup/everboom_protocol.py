@@ -16,10 +16,35 @@ def crc16(data):
 
 
 def packet(category, operation, sequence, payload=b''):
-    body = bytes([category, (operation << 4) | sequence]) + payload
-    prefix = b'\x13\xa0' + (len(body) + 1).to_bytes(2, 'little') + body
+    if not 0 <= category <= 255 or not 0 <= operation <= 15 or not 1 <= sequence <= 15:
+        raise ValueError('Invalid CPP request identifiers')
+    body = bytes([0, category, (operation << 4) | sequence]) + payload
+    if len(body)>4095:
+        raise ValueError('CPP payload exceeds frame length limit')
+    prefix = bytes([0x13,0xa0 | (len(body)>>8),len(body)&255]) + body
     return prefix + crc16(prefix).to_bytes(2, 'little')
 
+def extract_frames(buffer):
+    frames=[]
+    while len(buffer)>=3:
+        if buffer[0]!=0x13 or buffer[1]&0xf0!=0xa0:
+            del buffer[0]
+            continue
+        size=((buffer[1]&15)<<8 | buffer[2])+5
+        if size<8:
+            del buffer[0]
+            continue
+        if len(buffer)<size:
+            break
+        frames.append(bytes(buffer[:size]))
+        del buffer[:size]
+    return frames
+
+class RequestIds:
+    def __init__(self): self.value=0
+    def next(self):
+        self.value=self.value%15+1
+        return self.value
 
 class Everboom(UE):
     def request(self, category, operation, sequence, payload=b'', seconds=2):
@@ -43,15 +68,7 @@ class Everboom(UE):
                     continue
                 raise RuntimeError(f'receive error {error}')
             self.buffer.extend(data.raw[:count])
-            while len(self.buffer) >= 4:
-                if self.buffer[:2] != b'\x13\xa0':
-                    del self.buffer[0]
-                    continue
-                size = int.from_bytes(self.buffer[2:4], 'little') + 5
-                if len(self.buffer) < size:
-                    break
-                frames.append(bytes(self.buffer[:size]))
-                del self.buffer[:size]
+            frames.extend(extract_frames(self.buffer))
         return frames
 
 

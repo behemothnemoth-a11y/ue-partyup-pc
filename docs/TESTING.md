@@ -27,6 +27,21 @@ Automated tests do not prove hardware support. Stop, rollback, selector persiste
 
 Publication requires explicit owner approval. Initial compatibility must be advertised as EVERBOOM only.
 
+## REA-guided repair, version 0.1.1
+
+The owner's current installed APK was copied locally through authorized ADB. REA/JADX analysis identified the actual three-byte framing length and fresh 1–15 software request IDs. The repaired controller has regression tests for fragmented/multiple replies, high length bits, nonzero device IDs, request-ID rollover and sequential workflow IDs.
+
+Hardware controller cycle completed successfully on the selected pair:
+
+| Action | Verified result |
+|---|---|
+| Start | Matching guest receiver reported; host state 3 |
+| Stop | Guest clear write accepted; host state 0 read back |
+| Restart | Matching guest receiver reported; host state 3 |
+| Playback after restart | Owner confirmed both speakers play |
+
+This cycle used the same controller called by the GUI, through direct local execution. It does not certify the reloaded GUI buttons or swapped-host behavior. Audible silence of the guest during Stop was not separately confirmed by the owner. Twelve automated tests pass. Group left enabled at completion.
+
 ## 2026-10-14 interface test
 
 Native window and speaker selectors were exercised. The default non-host selection produced connection failures. On the original host, an early state query failed before Stop sent any group mutation. Stop/restart audible acceptance remains open.

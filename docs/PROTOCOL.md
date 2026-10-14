@@ -2,9 +2,17 @@
 
 Independent implementation derived from an owner-supplied Android HCI capture of a successful official-app PartyUp session. Raw captures are private and excluded.
 
-Frame: `13 A0`, 16-bit little-endian length, category byte, operation/sequence byte, payload, 16-bit checksum. Total size is length + 5. Operation is the upper nibble; sequence is the lower nibble.
+Frame: `13`, then `A0 | length_high_nibble`, then `length_low_byte`, followed by the CPP message and 16-bit checksum. The CPP message begins with device ID, category, and operation/request-ID bytes. Total size is length + 5. Operation is the upper nibble; request ID is the lower nibble. IDs advance 1 through 15 and wrap to 1; zero is reserved for unsolicited events. A nonzero device ID must never be interpreted as a length byte.
 
 Outgoing CRC uses reflected polynomial 0x8408, initial 0xFFFF, no final XOR; emitted little-endian over all preceding bytes. All 62 complete recovered outgoing modern messages matched. Observed reply trailers are zero; reply checksum validation is not asserted.
+
+## Current APK validation with REA
+
+The owner's installed APK was copied over authorized USB debugging, SHA-256 `018e9d6159311034327780480ee3798a7cdf31c5e7d174b6c496bf2254410e76`. REA 6.5.0 with pinned JADX 0.7.1 inspected it statically. No app code or APK is distributed in this repository.
+
+`CLPSPPWrapperConnection.wrapPayload` and `extractPayloadSize` establish the three-byte length framing above. `CPPConductor.generateSWId` and `execute$lambda$1` establish per-command IDs and 1–15 rollover; `checkExpectedMessage` correlates replies by request ID. This corrects the initial capture interpretation. The legacy two-byte-length parser could stall when message device ID was nonzero.
+
+`XupBroadcastModeCommand` distinguishes mode/audio changes and waits for a mode-change event. `XupReceiverController.removeFromGroup` invokes the guest's leave operation. The independent controller retains captured start/clear writes and verifies host off-state separately.
 
 | Operation | Category | Operation nibble | Payload |
 |---|---|---|---|
