@@ -28,11 +28,23 @@ async def control(action,host,guest,progress=lambda message:None):
     if action not in ('start','stop','status'):
         raise ValueError('Unknown action.')
     progress('Connecting to the main speaker…')
-    speaker=await asyncio.to_thread(Everboom,host.address)
+    speaker=None
+    for attempt in range(2):
+        try:
+            speaker=await asyncio.to_thread(Everboom,host.address)
+            break
+        except RuntimeError:
+            if attempt:
+                raise RuntimeError('Main speaker connection timed out. Keep it on, close the phone app, and check that the selected speaker is your audio source.') from None
+            progress('Main speaker did not connect. Retrying once…')
+            await asyncio.sleep(2)
     async def request(cat,op,seq,payload=b'',seconds=2):
         return await asyncio.to_thread(speaker.request,cat,op,seq,payload,seconds)
     try:
         frames=await request(0,0,1,b'\0\1')
+        if not matching(frames,0,0,1):
+            progress('Waiting for the speaker control session…')
+            frames=await request(0,0,1,b'\0\1')
         if not matching(frames,0,0,1):
             raise RuntimeError('The main speaker did not respond. Close the phone app and retry.')
         frames=await request(11,1,9)

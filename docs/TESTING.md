@@ -26,3 +26,9 @@
 Automated tests do not prove hardware support. Stop, rollback, selector persistence and new UI are not marked verified until exercised. No firmware updates or resets are part of acceptance.
 
 Publication requires explicit owner approval. Initial compatibility must be advertised as EVERBOOM only.
+
+## 2026-10-14 interface test
+
+Native window and speaker selectors were exercised. The default non-host selection produced connection failures. On the original host, an early state query failed before Stop sent any group mutation. Stop/restart audible acceptance remains open.
+
+Bounded connection and initialization retries added; eight regression tests pass. A subsequent direct call to the refactored Start controller completed and reported the matching guest. This verifies the controller path, not the complete UI stop/restart cycle. Actual audio after this recovery still needs user confirmation.
