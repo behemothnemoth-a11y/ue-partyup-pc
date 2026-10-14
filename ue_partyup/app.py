@@ -9,7 +9,7 @@ from .controller import control,discover
 
 DATA=Path(__file__).resolve().parents[1]/'data'
 
-def main():
+def main(smoke=False):
     root=tk.Tk()
     root.title('UE PartyUp PC — private preview')
     root.geometry('680x460')
@@ -95,5 +95,9 @@ def main():
         else: root.destroy()
     root.protocol('WM_DELETE_WINDOW',close)
     poll()
-    root.after(150,refresh)
+    if smoke:
+        root.withdraw()
+        root.after(150,root.destroy)
+    else:
+        root.after(150,refresh)
     root.mainloop()
