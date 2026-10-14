@@ -36,6 +36,12 @@ def extract_frames(buffer):
             continue
         if len(buffer)<size:
             break
+        # The inspected app bypasses its CRC validator on receive. Zero trailers
+        # are present in the tested speakers; validate nonzero trailers when supplied.
+        trailer = int.from_bytes(buffer[size-2:size], 'little')
+        if trailer and crc16(buffer[:size-2]) != trailer:
+            del buffer[0]
+            continue
         frames.append(bytes(buffer[:size]))
         del buffer[:size]
     return frames
@@ -49,26 +55,32 @@ class RequestIds:
 class Everboom(UE):
     def request(self, category, operation, sequence, payload=b'', seconds=2):
         data = packet(category, operation, sequence, payload)
-        if self.ws.send(self.sock, data, len(data), 0) != len(data):
-            raise RuntimeError('send failed')
+        self.send_all(data)
         return self.read_modern(seconds)
 
     def read_modern(self, seconds):
-        import ctypes as c
+        import math
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError('Read duration must be finite and nonnegative.')
         frames = []
         deadline = time.monotonic() + seconds
+        if self.buffer and time.monotonic()-getattr(self, '_partial_started', 0) >= 2:
+            self.buffer.clear()
+            self._partial_started = 0
         while time.monotonic() < deadline:
-            data = c.create_string_buffer(4096)
-            count = self.ws.recv(self.sock, data, len(data), 0)
-            if count == 0:
-                break
-            if count < 0:
-                error = self.ws.WSAGetLastError()
-                if error == 10060:
-                    continue
-                raise RuntimeError(f'receive error {error}')
-            self.buffer.extend(data.raw[:count])
+            data = self.recv_chunk(deadline-time.monotonic())
+            if data is None:
+                continue
+            self.buffer.extend(data)
             frames.extend(extract_frames(self.buffer))
+            if self.buffer:
+                if not getattr(self, '_partial_started', 0):
+                    self._partial_started = time.monotonic()
+                elif time.monotonic()-self._partial_started >= 2:
+                    self.buffer.clear()
+                    self._partial_started = 0
+            else:
+                self._partial_started = 0
         return frames
 
 

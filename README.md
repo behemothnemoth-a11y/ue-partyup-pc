@@ -1,42 +1,41 @@
 # UE PartyUp PC
 
-Independent Windows desktop controller for grouping two Ultimate Ears EVERBOOM speakers without a phone during normal use.
+Independent Windows desktop controller for Ultimate Ears PartyUp, with one main speaker and up to nine guests.
 
-**Private preview, version 0.1.1.** The controller completed Start → Stop → Start on one pair of EVERBOOMs, with state checks after every action and user-confirmed audio from both speakers after restart. Full interface acceptance, swapped-host and failure-case hardware checks remain pending. No other UE model is supported yet. Not affiliated with or endorsed by Logitech or Ultimate Ears.
+**Private preview, version 0.2.0.** Two EVERBOOMs have been tested with PC audio and a Start → Stop → Start cycle in the earlier controller. The expanded ten-speaker workflow, new controls and older-speaker adapter have automated tests; physical acceptance remains model- and control-specific. The repository stays private until the owner approves publication. Not affiliated with Logitech or Ultimate Ears.
 
 ## Use
 
-Requirements: Windows 10/11 with Bluetooth Classic and BLE support; Python 3.13 with tkinter; two EVERBOOMs paired separately in Windows.
+Requirements: Windows 10/11, Bluetooth Classic and BLE, Python 3.13 with tkinter. Pair every speaker separately in Windows. The PC needs an audio connection only to the main speaker; speakers distribute PartyUp audio themselves.
 
-1. Run `Setup.cmd` once to create a local environment and install the pinned dependency. This requires internet access and explicitly downloads packages.
-2. Turn both speakers on and close the mobile UE app. If it retains the connection, temporarily disable phone Bluetooth.
+1. Run `Setup.cmd` once in a fresh checkout to install the pinned project dependency.
+2. Turn the speakers on and close the mobile UE app. If it retains the control connection, temporarily turn phone Bluetooth off.
 3. Open `Open PartyUp.cmd`.
-4. Select different main and second speakers. Labels use the final four address digits to distinguish identical names. Find those digits in Windows device details if needed.
-5. Click **Start PartyUp**, then play laptop audio through the selected main speaker using Windows sound settings.
-6. **Check status** queries host configuration; it does not claim the guest is audible. **Stop PartyUp** sends the captured stop/clear sequence and verifies host broadcasting is off.
+4. Choose your main audio speaker, then select up to nine guests.
+5. Start the selected group and play Windows audio through the chosen main speaker.
+6. Add or remove selected guests individually. Check status reads host configuration and receiver reports; these do not prove audible playback.
+7. Stop ends host broadcasting and attempts to clear every selected guest. An unreachable guest is reported separately. Closing the idle app leaves audio playing.
 
-The launcher in the original development checkout can reuse the approved project environment. A fresh clone requires Setup.cmd.
+Change the main speaker deliberately: stop the old group, choose the new main and guests, start the new group, then switch Windows audio output. Automatic migration and automatic Windows output switching are not implemented.
 
-## What it does
+The original development launcher can reuse the approved local Bluetooth environment. A fresh clone uses Setup.cmd. Selection and remembered identities are saved under ignored `data/`; addresses are never included in project documentation or committed diagnostic reports.
 
-The main speaker receives framed RFCOMM commands. The guest receives a BLE write referencing the selected host. The speakers distribute the audio themselves; the app does not duplicate Windows audio streams. Connections close after operations; this does not inherently end the speaker group. Closing the app leaves the group running.
+## Controls
 
-Selection is remembered under ignored `data/selection.json`. No cloud services, telemetry, account login, firmware changes or automatic capture uploads. Raw phone bug reports and Bluetooth captures are excluded from this repository.
+The desktop has separate group, speaker, sound and PartyUp tabs. Read a speaker's controls first; supported features enable the corresponding controls. Available implementations include volume, battery readout, renaming, advertised EQ presets and five custom bands, outdoor mode, remote activation setting, power off, playback commands, persistent PartyUp, identification, group volume sync and source-backed channel assignment. Some model-specific units or readbacks remain unresolved and are labelled accordingly.
 
-If the guest operation fails after the host changes mode, the controller attempts to restore the previous host configuration and reports whether that restoration was acknowledged. It cannot guarantee restoration of the guest's previous group membership. No automated reconnect/background grouping happens on startup.
+Older BOOM and MEGABOOM speakers use an explicitly enabled experimental adapter. Protocol and identity queries must succeed before writes. Basic legacy controls include name, 16/32-step volume, sticky/public PartyUp, battery announcement, power off, and group operations. Marketing names alone do not choose a protocol; BOOM 3 has both legacy and CPP revisions in the current app.
 
-## Troubleshooting
+See [control coverage and limits](docs/CONTROLS.md), [model compatibility](docs/COMPATIBILITY.md), [protocol evidence](docs/PROTOCOL.md), and [acceptance results](docs/TESTING.md). A recovered command and an ACK are implementation evidence, not a hardware compatibility claim. Mobile streaming integrations, alarms, megaphone, firmware updates and remote waking are not completed by this preview.
 
-- Connection timeout: keep both speakers powered on, close the phone app, wait briefly and retry. Check your Bluetooth adapter supports both Classic and BLE.
-- Only the main speaker plays: confirm Windows output is the selected main speaker; check the guest is nearby and not playing another source. The app reports if it did not observe a receiver confirmation.
-- Access denied inside a sandbox: run the launcher from your normal Windows session. Admin access is not assumed.
-- Renamed speakers may not appear: current discovery filters cached device names containing EVERBOOM. Support for renamed devices is pending.
-- Windows speaker labels may match: use address suffixes to distinguish the two; renaming alone is not yet supported.
+## Failure behavior
+
+Bluetooth connection, send and receive operations are bounded. Requests use fresh correlated IDs, read-only retries and typed reply checks. Mutations are sent once; a missing reply leaves their result unknown. One failing guest does not stop the successfully joined guests. Stop continues through guest failures and separately checks whether the host is off.
+
+The UI runs operations away from its main thread and reports progress for each guest. It does not perform grouping automatically at startup. The PC sends control messages, not duplicated Windows audio streams; this is synchronized multi-speaker music rather than discrete 5.1/7.1 surround audio.
 
 ## Development
 
-`python -m unittest discover -s tests -v`
+Run `python -m unittest discover -s tests -v`. Tests mock speaker I/O and cover ten distinct members, invalid/duplicate selections, partial failures, individual removal, response correlation, legacy command validation, settings serialization and bounded transport cleanup. Run `python -m ue_partyup --smoke` to construct and close the UI without speaker commands.
 
-Tests use captured-packet fixtures and input/acknowledgement checks, without Bluetooth writes. Hardware evidence and limitations are in [docs/TESTING.md](docs/TESTING.md). Wire framing and provenance are in [docs/PROTOCOL.md](docs/PROTOCOL.md).
-
-No public release until the acceptance checklist passes and the owner explicitly approves publication. Other UE families require model-specific captures and tests before being enabled.
+No accounts, telemetry or cloud playback are required. Raw captures, phone bug reports, APKs, decompiled source, credentials and local selections are excluded. No public release until hardware acceptance and explicit owner approval.

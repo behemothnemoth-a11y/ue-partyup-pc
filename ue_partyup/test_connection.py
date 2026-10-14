@@ -15,7 +15,7 @@ class Address(c.Structure):
                 ('service', c.c_ubyte * 16), ('port', w.ULONG)]
 
 
-def targets():
+def paired_devices():
     api = c.WinDLL('BluetoothAPIs.dll', use_last_error=True)
     api.BluetoothFindFirstDevice.argtypes = [c.POINTER(Search), c.POINTER(Device)]
     api.BluetoothFindFirstDevice.restype = w.HANDLE
@@ -30,12 +30,14 @@ def targets():
     device.size = c.sizeof(device)
     handle = api.BluetoothFindFirstDevice(c.byref(search), c.byref(device))
     if not handle:
+        if c.get_last_error() == 259:
+            return []
         raise c.WinError(c.get_last_error())
     found = []
     try:
         while True:
-            if 'EVERBOOM' in device.name.upper() and device.authenticated:
-                found.append(device.address)
+            if device.authenticated:
+                found.append((device.address, device.name))
             if not api.BluetoothFindNextDevice(handle, c.byref(device)):
                 error = c.get_last_error()
                 if error != 259:
@@ -44,6 +46,56 @@ def targets():
     finally:
         api.BluetoothFindDeviceClose(handle)
     return list(dict.fromkeys(found))
+
+
+def targets():
+    return [address for address, name in paired_devices() if 'EVERBOOM' in name.upper()]
+
+
+def local_radios():
+    """Read local Bluetooth source addresses without discovery or speaker writes."""
+    class RadioSearch(c.Structure):
+        _fields_ = [('size', w.DWORD)]
+    class RadioInfo(c.Structure):
+        _fields_ = [('size', w.DWORD), ('address', c.c_ulonglong), ('name', w.WCHAR*248),
+                    ('device_class', w.ULONG), ('subversion', w.USHORT), ('manufacturer', w.USHORT)]
+    api = c.WinDLL('BluetoothAPIs.dll', use_last_error=True)
+    kernel = c.WinDLL('Kernel32.dll', use_last_error=True)
+    api.BluetoothFindFirstRadio.argtypes = [c.POINTER(RadioSearch), c.POINTER(w.HANDLE)]
+    api.BluetoothFindFirstRadio.restype = w.HANDLE
+    api.BluetoothFindNextRadio.argtypes = [w.HANDLE, c.POINTER(w.HANDLE)]
+    api.BluetoothFindNextRadio.restype = w.BOOL
+    api.BluetoothGetRadioInfo.argtypes = [w.HANDLE, c.POINTER(RadioInfo)]
+    api.BluetoothGetRadioInfo.restype = w.DWORD
+    api.BluetoothFindRadioClose.argtypes = [w.HANDLE]
+    kernel.CloseHandle.argtypes = [w.HANDLE]
+    kernel.CloseHandle.restype = w.BOOL
+    search, radio = RadioSearch(), w.HANDLE()
+    search.size = c.sizeof(search)
+    handle = api.BluetoothFindFirstRadio(c.byref(search), c.byref(radio))
+    if not handle:
+        if c.get_last_error() in (259, 0):
+            return []
+        raise c.WinError(c.get_last_error())
+    result = []
+    try:
+        while True:
+            info = RadioInfo(); info.size = c.sizeof(info)
+            try:
+                error = api.BluetoothGetRadioInfo(radio, c.byref(info))
+                if error:
+                    raise c.WinError(error)
+                result.append((info.address, info.name))
+            finally:
+                kernel.CloseHandle(radio)
+            if not api.BluetoothFindNextRadio(handle, c.byref(radio)):
+                error = c.get_last_error()
+                if error != 259:
+                    raise c.WinError(error)
+                break
+    finally:
+        api.BluetoothFindRadioClose(handle)
+    return result
 
 
 def connect_worker(address, pipe):
