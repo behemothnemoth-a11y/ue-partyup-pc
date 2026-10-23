@@ -5,6 +5,11 @@ from ue_partyup.classroom_view import ClassroomApp
 from ue_partyup.controller import Speaker
 
 class GuardInterfaceTests(unittest.TestCase):
+    def setUp(self):
+        self.popup_patch=patch('ue_partyup.app.messagebox.showwarning')
+        self.popup=self.popup_patch.start()
+        self.addCleanup(self.popup_patch.stop)
+
     def test_guest_read_error_clears_busy_and_allows_main_selection(self):
         with tempfile.TemporaryDirectory() as folder:
             root=tk.Tk();root.withdraw();app=ClassroomApp(root,Path(folder))
@@ -18,8 +23,9 @@ class GuardInterfaceTests(unittest.TestCase):
                     while app.busy and time.monotonic()<until:app._poll_events();time.sleep(.01)
                     self.assertFalse(app.busy)
                     self.assertIn('Guest controls are paused',app.status.get())
-                    self.assertEqual(app.playback_notice.winfo_manager(),'pack')
-                    self.assertIn('No guest control connection',app.playback_notice_text.get())
+                    self.popup.assert_called_once()
+                    self.assertIn('No guest control connection',self.popup.call_args.args[1])
+                    self.assertIs(self.popup.call_args.kwargs['parent'],root)
                     self.assertEqual(factory.call_count,1)
                     self.assertEqual(factory.call_args.args[0].address,1)
                 app.select_house_speaker(app.speakers[0])
@@ -44,10 +50,9 @@ class GuardInterfaceTests(unittest.TestCase):
                     self.assertIn('Stop PartyUp before changing',app.status.get())
                     self.assertFalse(app.selected_snapshot['sticky'])
                     self.assertFalse(app.sticky.get())
-                    self.assertEqual(app.playback_notice.winfo_manager(),'pack')
-                    self.assertIn('previous setting has been restored',app.playback_notice_text.get())
-                    app.playback_notice_dismiss.invoke()
-                    self.assertEqual(app.playback_notice.winfo_manager(),'')
+                    self.popup.assert_called_once()
+                    self.assertIn('previous setting has been restored',self.popup.call_args.args[1])
+                    self.assertIs(self.popup.call_args.kwargs['parent'],root)
                     self.assertEqual(session.request.await_count,1)
                     self.assertTrue(session.request.call_args.kwargs['read'])
             finally:

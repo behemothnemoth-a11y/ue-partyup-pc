@@ -1214,32 +1214,15 @@ class PartyUpApp(TuningUI):
             self.root.after(IDLE_POLL_MS,self.poll)
 
     def show_playback_notice(self, message):
-        from .theme import AMBER, DANGER_DARK
-        from .house_widgets import PocketButton, DISPLAY
-        if not hasattr(self, 'playback_notice'):
-            self.playback_notice = tk.Frame(self.root, bg=DANGER_DARK,
-                highlightbackground=AMBER, highlightthickness=3, padx=14, pady=10)
-            text = tk.Frame(self.playback_notice, bg=DANGER_DARK)
-            text.pack(side='left', fill='x', expand=True)
-            tk.Label(text, text='CHANGE BLOCKED TO PROTECT PLAYBACK', bg=DANGER_DARK,
-                     fg=AMBER, font=(DISPLAY, 12), anchor='w').pack(fill='x')
-            self.playback_notice_text = tk.StringVar()
-            tk.Label(text, textvariable=self.playback_notice_text, bg=DANGER_DARK,
-                     fg=INK, font=('Segoe UI', 11), anchor='w', justify='left',
-                     wraplength=820).pack(fill='x', pady=(5, 0))
-            self.playback_notice_dismiss = PocketButton(self.playback_notice, 'Dismiss',
-                self.playback_notice.pack_forget, width=130, height=44)
-            self.playback_notice_dismiss.pack(side='right', padx=(16, 0))
         guest = str(message).startswith('Guest controls are paused')
-        self.playback_notice_text.set(
-            'Guest controls are unavailable while PartyUp is on. Stop PartyUp first, then read the guest again. '
+        explanation = (
+            'Guest controls are unavailable while PartyUp is on.\n\n'
+            'Stop PartyUp first, then read the guest again.\n'
             'No guest control connection was opened.' if guest else
-            'Stop PartyUp before changing Remember PartyUp group. Your previous setting has been restored. '
+            'Stop PartyUp before changing Remember PartyUp group.\n\n'
+            'Your previous setting has been restored.\n'
             'No preference change was sent.')
-        if not self.playback_notice.winfo_manager():
-            visible = [w for w in self.root.pack_slaves() if w != self.playback_notice]
-            options = {'before': visible[0]} if visible else {}
-            self.playback_notice.pack(side='top', fill='x', padx=12, pady=(10, 0), **options)
+        messagebox.showwarning('Change blocked to protect playback', explanation, parent=self.root)
 
     def _poll_events(self):
         processed = 0

@@ -1,4 +1,4 @@
-# PartyUp PC 0.7.3 — experimental Windows alpha candidate
+# PartyUp PC 0.7.4 — experimental Windows alpha candidate
 
 Prepared privately; not published or approved for publication.
 
@@ -8,4 +8,4 @@ Playback safeguards block guest control connections and persistent-group changes
 
 Windows x64 folder bundle; extract the whole archive, run Install Private.cmd, then open PartyUp PC from Start. No Python or admin rights required. Unsigned. No account, telemetry or automatic updates. Close the old controller before opening an update. User settings persist separately. Keep the prior version for manual rollback.
 
-Blocked actions now show a persistent high-contrast warning panel above the content, with the reason, next step and Dismiss button. Preference checkboxes restore their confirmed state.
+Blocked actions now show an acknowledgment popup with the reason and next step. Preference checkboxes restore their confirmed state.

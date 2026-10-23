@@ -2,7 +2,7 @@
 
 Independent Windows desktop controller for Ultimate Ears PartyUp, with one main speaker and up to nine guests.
 
-**Experimental Windows alpha candidate, version 0.7.3. Publication pending owner approval.** Two EVERBOOMs have been tested with PC audio and a Start → Stop → Start cycle in the earlier controller. The expanded ten-speaker workflow, new controls and older-speaker adapter have automated tests; physical acceptance remains model- and control-specific. The repository stays private until the owner approves publication. Not affiliated with Logitech or Ultimate Ears.
+**Experimental Windows alpha candidate, version 0.7.4. Publication pending owner approval.** Two EVERBOOMs have been tested with PC audio and a Start → Stop → Start cycle in the earlier controller. The expanded ten-speaker workflow, new controls and older-speaker adapter have automated tests; physical acceptance remains model- and control-specific. The repository stays private until the owner approves publication. Not affiliated with Logitech or Ultimate Ears.
 
 ## Alpha support and known limits
 
@@ -19,7 +19,7 @@ See [release checks](docs/RELEASE-AUDIT.md), [testing](docs/TESTING.md), [privac
 
 ## Standalone Windows app
 
-Version 0.7.3 includes a standalone Windows x64 folder bundle; Python is not needed on the receiving PC. Extract the complete private release ZIP and run Install Private.cmd to install for the current user, then open PartyUp PC from the Start menu. No admin rights, automatic startup, telemetry or automatic updates are used. The bundle is an unsigned private preview.
+Version 0.7.4 includes a standalone Windows x64 folder bundle; Python is not needed on the receiving PC. Extract the complete private release ZIP and run Install Private.cmd to install for the current user, then open PartyUp PC from the Start menu. No admin rights, automatic startup, telemetry or automatic updates are used. The bundle is an unsigned private preview.
 
 Settings live in `%LOCALAPPDATA%/PartyUpPC/data`; bounded redacted failure logs live in its `logs` folder. Versioned app files live under `%LOCALAPPDATA%/Programs/PartyUpPC`. Source and packaged launches share the same settings location and single-instance guard. On a source launch, missing settings are imported from the old project data directory without overwriting current files. The installer also accepts an explicit `--import-settings` directory for a local migration. User data is never bundled.
 
