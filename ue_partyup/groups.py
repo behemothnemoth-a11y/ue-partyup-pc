@@ -9,6 +9,13 @@ MAX_SPEAKERS = 10
 XUP = 0x0204
 
 
+def broadcasting(payload):
+    """Scanning (1) and broadcasting (2) are separate flags in the UE app."""
+    if len(payload) != 2 or payload[0] not in (0, 1, 2, 3):
+        raise ProtocolError('Invalid PartyUp state reply.')
+    return bool(payload[0] & 2)
+
+
 def validate_group(host, guests, experimental=False):
     if len(guests) + 1 > MAX_SPEAKERS:
         raise ValueError('Choose one main speaker and up to nine guests (ten total).')
@@ -85,7 +92,7 @@ class GroupManager:
             else:
                 index = await session.feature(XUP)
                 state = await session.request(index, 1, read=True)
-                if len(state) != 2 or state[0] == 0:
+                if not broadcasting(state):
                     raise ProtocolError('Start the group before assigning a channel.')
                 await self._ack(session, index, 2, guest.address.to_bytes(6, 'big') + bytes([channel]))
         return f'{guest.label}: channel command accepted; verify left/right audio on hardware.'
@@ -103,11 +110,13 @@ class GroupManager:
             return await self._experimental(action, host, guests, progress)
         async with self.session_factory(host) as session:
             index = await session.feature(XUP)
+            configuration = None
             async def mode():
+                nonlocal configuration
                 reply = await session.request(index, 1, read=True)
-                if len(reply) != 2:
-                    raise ProtocolError('Invalid PartyUp state reply.')
-                return reply[0] != 0
+                enabled = broadcasting(reply)
+                configuration = reply
+                return enabled
             on = await mode()
             snapshot = receiver_snapshot(session.notifications, index)
             if action in ('start', 'add') and on and snapshot is None:
@@ -123,6 +132,17 @@ class GroupManager:
                 on = await mode()
                 if not on:
                     raise ProtocolError('Main speaker did not enable PartyUp.')
+            needs_ble_join = action in ('start', 'add') and any(
+                not guest.experimental and guest.address not in existing for guest in guests)
+            if needs_ble_join and configuration[0] == 3:
+                # REA: XupReceiverBLEController.initBroadcastMode changes 3->2
+                # on the broadcaster, preserving audio options; suspend is a no-op.
+                # The PC discovers the guest, so the host need not scan as well.
+                progress('Preparing the main speaker for the guest connection…')
+                await self._ack(session, index, 0, bytes([2, configuration[1]]))
+                on = await mode()
+                if configuration[0] != 2:
+                    raise ProtocolError('Broadcaster-only mode was not confirmed; guest join was not sent.')
             result = GroupResult(action, on)
             if action == 'stop':
                 # The tested two-speaker sequence stops the broadcaster first;
@@ -130,11 +150,19 @@ class GroupManager:
                 try:
                     await self._ack(session, index, 0, b'\0\0')
                     result.host_on = await mode()
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
+                    if isinstance(exc, asyncio.CancelledError) and asyncio.current_task().cancelling():
+                        raise
                     result.host_on = None
                     result.warnings.append(f'Host stop unconfirmed: {exc}')
             for number, guest in enumerate(guests, 1):
                 if action == 'status':
+                    continue
+                if action in ('start', 'add') and on and guest.address in existing:
+                    # A receiver report is not proof of audio, but it is enough
+                    # to avoid needlessly issuing the same join during playback.
+                    result.members.append(MemberResult(guest, 'reported by main speaker',
+                                                       'Already reported; no join command sent.'))
                     continue
                 progress(f'{"Joining" if action in ("start", "add") else "Removing"} {guest.label} ({number}/{len(guests)})…')
                 host_removed = False
@@ -161,7 +189,9 @@ class GroupManager:
                                 phase = 'closing the control connection'
                         await asyncio.wait_for(write_guest(), 25)
                     result.members.append(MemberResult(guest, 'join accepted' if joining else 'leave accepted'))
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
+                    if isinstance(exc, asyncio.CancelledError) and asyncio.current_task().cancelling():
+                        raise
                     detail = str(exc) or f'Timed out while {phase}; guest result is unknown.'
                     if write_accepted:
                         state = 'join accepted' if joining else 'leave accepted'
@@ -171,7 +201,9 @@ class GroupManager:
                     result.members.append(MemberResult(guest, state, detail))
             try:
                 await session.listen(2)
-            except Exception as exc:
+            except (Exception, asyncio.CancelledError) as exc:
+                if isinstance(exc, asyncio.CancelledError) and asyncio.current_task().cancelling():
+                    raise
                 result.warnings.append(f'Receiver refresh unavailable: {exc}')
             result.reported = receivers(session.notifications, index)
             for member in result.members:
@@ -183,7 +215,9 @@ class GroupManager:
             if action != 'status':
                 try:
                     result.host_on = await mode()
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
+                    if isinstance(exc, asyncio.CancelledError) and asyncio.current_task().cancelling():
+                        raise
                     result.host_on = None
                     result.warnings.append(f'Final host state unavailable: {exc}')
             return result
@@ -225,7 +259,9 @@ class GroupManager:
                     else:
                         await session.remove_guest(guest.address)
                     result.members.append(MemberResult(guest, 'command accepted; hardware confirmation required'))
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
+                    if isinstance(exc, asyncio.CancelledError) and asyncio.current_task().cancelling():
+                        raise
                     result.members.append(MemberResult(guest, 'unconfirmed', str(exc)))
             if action == 'stop':
                 await session.set_broadcast(0, 0)

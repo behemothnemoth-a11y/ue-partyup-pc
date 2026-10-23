@@ -65,13 +65,47 @@ class AppTests(unittest.TestCase):
     def test_construction_performs_no_discovery_or_speaker_io(self):
         self.discover.assert_not_called()
         self.assertFalse(self.app.busy)
-        self.assertEqual(len(self.app.notebook.tabs()), 4)
+        self.assertEqual(len(self.app.notebook.tabs()), 5)
         self.assertTrue(self.app.volume_scale.instate(['disabled']))
         self.assertEqual(self.app.device_combo.get(), '')
 
+    def test_activity_history_keeps_recent_lines_without_unbounded_growth(self):
+        from ue_partyup.app import MAX_LOG_LINES
+        self.app.append_log('\n'.join(f'entry-{i}' for i in range(MAX_LOG_LINES+100)))
+        text = self.app.log.get('1.0', 'end-1c')
+        self.assertEqual(len(text.splitlines()), MAX_LOG_LINES)
+        self.assertNotIn('entry-0\n', text)
+        self.assertIn(f'entry-{MAX_LOG_LINES+99}', text)
+
+    def test_hidden_activity_does_not_request_scroll_redraw(self):
+        with patch.object(self.app.log, 'see') as scroll:
+            self.app.append_log('Hidden activity still records results.')
+        scroll.assert_not_called()
+        self.assertIn('Hidden activity', self.app.log.get('1.0', 'end-1c'))
+
+    def test_idle_queue_poll_backs_off_and_active_poll_is_responsive(self):
+        from ue_partyup.app import IDLE_POLL_MS, BUSY_POLL_MS
+        with patch.object(self.root, 'after') as schedule:
+            self.app.poll()
+            self.assertEqual(schedule.call_args.args[0], IDLE_POLL_MS)
+            self.app.busy = True
+            self.app.poll()
+            self.assertEqual(schedule.call_args.args[0], BUSY_POLL_MS)
+        self.discover.assert_not_called()
+
+    def test_large_event_burst_yields_without_losing_pending_messages(self):
+        from ue_partyup.app import MAX_EVENTS_PER_TICK
+        for i in range(MAX_EVENTS_PER_TICK+1):
+            self.app.events.put(('progress', str(i)))
+        with patch.object(self.root, 'after') as schedule, patch.object(self.app, 'append_log'):
+            self.app.poll()
+        self.assertEqual(self.app.events.qsize(), 1)
+        self.assertEqual(self.app.status.get(), str(MAX_EVENTS_PER_TICK-1))
+        self.assertEqual(schedule.call_args.args[0], 10)
+
     def test_redesigned_tabs_scroll_and_group_actions_stay_visible(self):
         self.assertEqual(set(self.app.tab_viewports),
-                         {'Group', 'Speaker', 'Sound', 'PartyUp settings'})
+                         {'Group', 'Speaker', 'Sound', 'PartyUp settings', 'Guide'})
         footer = self.app.tab_viewports['Group'].footer
         labels = [child.cget('text')
                   for row in footer.winfo_children() for child in row.winfo_children()
@@ -328,6 +362,38 @@ class AppTests(unittest.TestCase):
         fake.eq.assert_awaited_once()
         fake.snapshot.assert_not_awaited()
 
+    def test_playback_does_not_follow_command_with_unrelated_feature_scan(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {'capabilities': {'playback': True}, 'errors': {}})
+        fake = SimpleNamespace(playback=AsyncMock(),
+                               snapshot=AsyncMock(side_effect=AssertionError('unrelated scan')))
+        context = AsyncMock(); context.__aenter__.return_value = fake
+        with patch('ue_partyup.controls.settings_session', return_value=context), patch.object(self.app, 'worker') as worker:
+            self.app.setting('playback', 'next', 1)
+            kind, task = worker.call_args.args
+            message = task()
+        self.assertEqual(kind, 'message')
+        self.assertIn('command accepted', message)
+        fake.playback.assert_awaited_once_with('next', 1)
+        fake.snapshot.assert_not_awaited()
+
+    def test_timer_change_reads_back_only_timer_and_preserves_other_fields(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {'capabilities': {'sleep_timer': True},
+                                         'sleep_timer': 15, 'errors': {}})
+        fake = SimpleNamespace(set_sleep_timer=AsyncMock(), sleep_timer=AsyncMock(return_value=30),
+                               snapshot=AsyncMock(side_effect=AssertionError('unrelated scan')))
+        context = AsyncMock(); context.__aenter__.return_value = fake
+        with patch('ue_partyup.controls.settings_session', return_value=context), patch.object(self.app, 'worker') as worker:
+            self.app.setting('set_sleep_timer', 30)
+            kind, task = worker.call_args.args
+            _, field, confirmed, error = task()
+        self.assertEqual((kind, field, confirmed, error), ('adjusted', 'sleep_timer', 30, None))
+        fake.sleep_timer.assert_awaited_once()
+        fake.snapshot.assert_not_awaited()
+
     def test_ack_without_readback_does_not_claim_volume_verified(self):
         speaker = Speaker(1)
         self.app.show_discovery([speaker], [])
@@ -356,6 +422,58 @@ class AppTests(unittest.TestCase):
             self.app.close()
         message.assert_called_once()
         destroy.assert_not_called()
+
+    def test_loading_local_eq_memory_never_sends_a_command(self):
+        speaker = Speaker(1)
+        self.app.show_discovery([speaker], [])
+        self.app.render_snapshot(speaker, {'capabilities': {'eq': True},
+            'eq': EQInfo(3, (0, 0, 0, 0, 0)), 'supported_eq_modes': (3, 4), 'errors': {}})
+        self.app.memory_combo.set('Living room')
+        with patch.object(self.app.eq_profiles, 'records', return_value={
+                'Living room': {'mode': 4, 'bands': (1, 2, -3, 4, 5)}}), \
+             patch.object(self.app, 'setting') as setting:
+            self.app.load_eq_memory()
+        self.assertEqual(tuple(value.get() for value in self.app.eq_bands), (1, 2, -3, 4, 5))
+        self.assertEqual(self.app.eq_choices[self.app.eq_combo.current()][1], 4)
+        setting.assert_not_called()
+
+    def test_drag_join_uses_only_dragged_guest_and_busy_drag_does_nothing(self):
+        guest = Speaker(2)
+        self.app.dragged_speaker = ('add', guest, 0, 0)
+        target = self.app.member_tree
+        with patch.object(target, 'winfo_ismapped', return_value=True), \
+             patch.object(target, 'winfo_rootx', return_value=100), \
+             patch.object(target, 'winfo_rooty', return_value=100), \
+             patch.object(target, 'winfo_width', return_value=200), \
+             patch.object(target, 'winfo_height', return_value=200), \
+             patch.object(self.app, 'group_action') as action:
+            self.app.finish_speaker_drag(SimpleNamespace(x_root=150, y_root=150))
+            action.assert_called_once_with('add', guests_override=[guest])
+            action.reset_mock()
+            self.app.busy = True
+            self.app.dragged_speaker = ('add', guest, 0, 0)
+            self.app.finish_speaker_drag(SimpleNamespace(x_root=150, y_root=150))
+            action.assert_not_called()
+
+    def test_click_without_drag_sends_no_join(self):
+        self.app.dragged_speaker = ('add', Speaker(2), 100, 100)
+        with patch.object(self.app, 'group_action') as action:
+            self.app.finish_speaker_drag(SimpleNamespace(x_root=102, y_root=102))
+        action.assert_not_called()
+
+    def test_group_volume_sync_targets_host_not_selected_control_device(self):
+        self.app.show_discovery([Speaker(1), Speaker(2)], [])
+        self.app.device_combo.current(1)
+        settings = SimpleNamespace(sync_volume=AsyncMock())
+        context = AsyncMock(); context.__aenter__.return_value = settings
+        with patch('ue_partyup.controls.settings_session', return_value=context) as session, \
+             patch.object(self.app, 'worker') as worker:
+            self.app.sync_group_volume()
+            _, task = worker.call_args.args
+            message = task()
+        self.assertEqual(session.call_args.args[0].address, 1)
+        settings.sync_volume.assert_awaited_once()
+        self.assertIn('does not adjust audio/video', message)
 
 
 if __name__ == '__main__':

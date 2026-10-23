@@ -134,3 +134,14 @@ inverse outdoor mode, sleep presets, MAC byte order, and setter acknowledgement
 handling. Fake-session tests never send Bluetooth commands. Physical acceptance
 results belong in `TESTING.md`; a test suite pass is not a device compatibility
 claim.
+
+## v0.3.0 additions / corrections
+
+- PC-local named EQ memories are implemented (up to 20). These do not claim to write a speaker-side custom-EQ name. Loading stages sliders; Apply EQ writes.
+- Source-backed modern BLE wake is now implemented behind explicit preview opt-in. The characteristic and default payload were independently reconstructed from CPPDevice/BLEUtilsKt/BLEPowerCommand/BLECharacteristics. GATT acknowledgement is not power-state confirmation; physical wake acceptance is outstanding. Legacy wake remains unimplemented.
+- XUp guest channel assignment exists through GroupManager.set_channel and the Group UI; this supersedes the older inventory's pending implementation row. Physical stereo separation still needs acceptance.
+- Group volume sync has a direct main-targeted UI shortcut. Its purpose is volume alignment, not audio/video timing.
+- APP-PARITY.md records the broader researched flow and outstanding alarms, service playlists, Megaphone and firmware work.
+
+## Playback protections — 0.7.1
+Live tests found audio interruptions during a direct guest snapshot and a persistent-group toggle while playing. Root causes remain unresolved. All UI guest settings/read/EQ paths now query the selected main first and refuse to open a guest control transport while the main reports broadcasting; missing/malformed/failed state reads also prevent guest access. Main settings remain available. Guest controls require explicitly stopping PartyUp first; the app never stops the group automatically for a read. Changing Remember PartyUp group now queries broadcaster state before its setter and refuses active/unknown state. These are protective restrictions, not a claim of uninterrupted direct guest controls. Another application or external device can change group state after the check, so this is not a cross-device lock.

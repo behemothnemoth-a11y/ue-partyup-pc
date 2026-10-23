@@ -257,7 +257,12 @@ class Settings:
         return boolean(await self._read(XUP, 9), 'persistent PartyUp group')
 
     async def set_sticky(self, enabled):
-        await self._write(XUP, 8, bool_payload(enabled))
+        payload = bool_payload(enabled)
+        from .groups import broadcasting
+        state = await self._read(XUP, 1)
+        if broadcasting(state):
+            raise UnsupportedControl('Stop PartyUp before changing Remember PartyUp group; changing it during playback can interrupt audio.')
+        await self._write(XUP, 8, payload)
 
     async def public(self):
         return boolean(await self._read(XUP_RECEIVER, 0), 'PartyUp visibility')

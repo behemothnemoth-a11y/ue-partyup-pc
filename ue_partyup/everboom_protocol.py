@@ -1,9 +1,6 @@
 """EVERBOOM framing recovered from the user's official-app capture."""
 import time
-import json
-from pathlib import Path
 from .ue_protocol import UE
-from .test_connection import targets
 
 
 def crc16(data):
@@ -56,9 +53,9 @@ class Everboom(UE):
     def request(self, category, operation, sequence, payload=b'', seconds=2):
         data = packet(category, operation, sequence, payload)
         self.send_all(data)
-        return self.read_modern(seconds)
+        return self.read_modern(seconds, expected=(category, operation, sequence))
 
-    def read_modern(self, seconds):
+    def read_modern(self, seconds, expected=None):
         import math
         if not math.isfinite(seconds) or seconds < 0:
             raise ValueError('Read duration must be finite and nonnegative.')
@@ -81,6 +78,13 @@ class Everboom(UE):
                     self._partial_started = 0
             else:
                 self._partial_started = 0
+            # Stop on this request's reply, not just any traffic. Keep every
+            # parsed frame in the batch so Session retains unsolicited events.
+            # An error reply also ends the wait; Session decodes it as an error.
+            if expected is not None:
+                category, operation, sequence = expected
+                if any(f[4] == category and f[5] == (operation << 4) | sequence for f in frames):
+                    return frames
         return frames
 
 

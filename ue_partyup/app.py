@@ -13,9 +13,24 @@ from .controller import discover
 from .groups import GroupManager
 from . import __version__
 from .theme import apply_theme, ScrollableTab, INPUT, INK, MUTED, ACCENT, BORDER
+from .pixel_art import header_art, PixelGroupMap
+from .profiles import EQProfiles
+from .feature_guide import FEATURE_GUIDE, UE_GUIDE
 
 
-DATA = Path(__file__).resolve().parents[1] / 'data'
+from .runtime import data_directory
+DATA = data_directory()
+MAX_LOG_LINES = 500
+MAX_EVENTS_PER_TICK = 32
+IDLE_POLL_MS = 300
+BUSY_POLL_MS = 60
+SETTING_READBACK = {
+    'set_volume': 'volume', 'set_eq': 'eq', 'set_outdoor': 'outdoor',
+    'set_sleep_timer': 'sleep_timer', 'set_remote_activation': 'remote_activation',
+    'set_sticky': 'sticky', 'set_public': 'public',
+}
+ACK_ONLY_ACTIONS = frozenset(('playback', 'identify', 'sync_volume',
+                              'announce_battery', 'set_stereo_balance'))
 
 
 def load_selection(path):
@@ -61,11 +76,16 @@ def format_value(value):
     return str(value)
 
 
-class PartyUpApp:
+from .tuning_ui import TuningUI
+from .tuning import TuningState
+
+
+class PartyUpApp(TuningUI):
     def __init__(self, root, data_path=DATA):
         self.root, self.data_path = root, data_path
         self.events = queue.Queue()
         self.busy = False
+        self.tuning = TuningState()
         self.speakers = []
         self.guest_choices = []
         self.member_speakers = {}
@@ -73,6 +93,8 @@ class PartyUpApp:
         self.radios = []
         self.selected_snapshot = {}
         self.eq_choices = []
+        self.eq_profiles = EQProfiles(data_path / 'eq-memories.json')
+        self.dragged_speaker = None
         self.eq_band_scales = []
         self.sound_requested = set()
         self.sound_hint = tk.StringVar(value='Open Sound to read controls for the selected speaker.')
@@ -90,6 +112,7 @@ class PartyUpApp:
         self.public = tk.BooleanVar(value=False)
         self.silent_power = tk.BooleanVar(value=False)
         self.experimental_balance = tk.BooleanVar(value=False)
+        self.experimental_wake = tk.BooleanVar(value=False)
         self.volume = tk.DoubleVar(value=0)
         self.balance = tk.DoubleVar(value=0)
         self.eq_bands = [tk.DoubleVar(value=0) for _ in range(5)]
@@ -101,28 +124,33 @@ class PartyUpApp:
         shell = ttk.Frame(root, style='Shell.TFrame', padding=(18, 14, 18, 10))
         shell.pack(fill='both', expand=True)
 
-        # Studio-style header. The count is paired records, not a claim of audio.
-        hero = ttk.Frame(shell, style='Hero.TFrame', padding=(22, 14))
+        # A compact brand header keeps the speaker workspace above the fold.
+        hero = ttk.Frame(shell, style='Hero.TFrame', padding=(20, 12))
         hero.pack(fill='x')
         brand = ttk.Frame(hero, style='Hero.TFrame')
         brand.pack(side='left', fill='x', expand=True)
-        ttk.Label(brand, text='UE  /  AUDIO CONTROL DESK    •    PRIVATE PREVIEW',
-                  style='Kicker.TLabel').pack(anchor='w')
-        ttk.Label(brand, text='PartyUp', style='HeroTitle.TLabel').pack(anchor='w', pady=(2, 0))
-        ttk.Label(brand, text='One source. A room full of sound. Controlled from your PC.',
+        title_row = ttk.Frame(brand, style='Hero.TFrame')
+        title_row.pack(anchor='w')
+        ttk.Label(title_row, text='PARTYUP', style='HeroTitle.TLabel').pack(side='left')
+        ttk.Label(title_row, text='  /  PC', style='Kicker.TLabel').pack(side='left', padx=(4, 0))
+        ttk.Label(brand, text='Tiny speakers. House-sized adventures.',
                   style='HeroSub.TLabel').pack(anchor='w')
+        ttk.Label(brand, text='PIXEL PARTY  /  WINDOWS', style='Kicker.TLabel').pack(anchor='w', pady=(8, 0))
         overview = ttk.Frame(hero, style='Hero.TFrame')
         overview.pack(side='right', padx=(20, 0))
         ttk.Label(overview, textvariable=self.device_count,
                   style='HeroBadge.TLabel').pack(anchor='e')
-        ttk.Label(overview, text='EVERBOOM VERIFIED PAIR  /  UP TO 10 IN SOFTWARE',
-                  style='HeroSub.TLabel').pack(anchor='e', pady=(10, 0))
+        ttk.Label(overview, text='Private preview · Up to 10 speakers',
+                  style='HeroSub.TLabel').pack(anchor='e', pady=(6, 0))
+        art = header_art(hero)
+        if art is not None:
+            art.pack(side='right', padx=(12, 4))
 
         toolbar = ttk.Frame(shell, style='Toolbar.TFrame', padding=(15, 9))
         toolbar.pack(fill='x', pady=(11, 9))
         toolbar_top = ttk.Frame(toolbar, style='Toolbar.TFrame')
         toolbar_top.pack(fill='x', pady=(0, 7))
-        ttk.Label(toolbar_top, text='SPEAKER LIBRARY', style='ToolbarTitle.TLabel').pack(side='left')
+        ttk.Label(toolbar_top, text='YOUR SPEAKERS', style='ToolbarTitle.TLabel').pack(side='left')
         toggle = ttk.Checkbutton(toolbar_top, text='Experimental older speakers',
                                  variable=self.experimental, command=self.update_enabled,
                                  style='Toolbar.TCheckbutton')
@@ -132,19 +160,18 @@ class PartyUpApp:
         toolbar_controls.pack(fill='x')
         self.button(toolbar_controls, 'Find speakers', self.refresh,
                     variant='Quiet.TButton').pack(side='left', padx=(0, 12))
-        ttk.Label(toolbar_controls, text='Control target', style='ToolbarMuted.TLabel').pack(side='left', padx=(0, 9))
+        ttk.Label(toolbar_controls, text='Control', style='ToolbarMuted.TLabel').pack(side='left', padx=(0, 9))
         self.device_combo = ttk.Combobox(toolbar_controls, state='readonly', width=34)
         self.device_combo.pack(side='left', fill='x', expand=True)
         self.controls.append((self.device_combo, 'readonly'))
         self.device_combo.bind('<<ComboboxSelected>>', self.device_changed)
-        self.button(toolbar_controls, 'Read controls', self.read_controls,
-                    variant='Primary.TButton').pack(side='left', padx=(12, 0))
+        self.button(toolbar_controls, 'Read controls', self.read_controls).pack(side='left', padx=(12, 0))
 
         self.notebook = ttk.Notebook(shell)
         self.notebook.pack(fill='both', expand=True, pady=(1, 10))
         tabs = {}
         self.tab_viewports = {}
-        for name in ('Group', 'Speaker', 'Sound', 'PartyUp settings'):
+        for name in ('Group', 'Speaker', 'Sound', 'PartyUp settings', 'Guide'):
             viewport = ScrollableTab(self.notebook)
             self.notebook.add(viewport, text=name)
             self.tab_viewports[name] = viewport
@@ -153,6 +180,7 @@ class PartyUpApp:
         self.build_device(tabs['Speaker'])
         self.build_sound(tabs['Sound'])
         self.build_partyup(tabs['PartyUp settings'])
+        self.build_guide(tabs['Guide'])
         self.notebook.bind('<<NotebookTabChanged>>', self.on_tab_changed)
         for viewport in self.tab_viewports.values():
             viewport.enable_wheel()
@@ -165,8 +193,10 @@ class PartyUpApp:
         self.status_widget.pack(side='left', fill='x', expand=True)
         log_heading = ttk.Frame(shell, style='Shell.TFrame')
         log_heading.pack(fill='x', pady=(0, 6))
-        ttk.Label(log_heading, text='ACTIVITY  /  DIAGNOSTICS',
-                  style='Footer.TLabel').pack(side='left')
+        self.activity_visible = False
+        self.activity_button = self.button(log_heading, '▸  Show activity', self.toggle_activity,
+                                           variant='Quiet.TButton')
+        self.activity_button.pack(side='left')
         ttk.Label(log_heading, text='Local only · No telemetry',
                   style='Footer.TLabel').pack(side='right')
         self.log = ScrolledText(shell, height=3, state='disabled', wrap='word',
@@ -176,9 +206,9 @@ class PartyUpApp:
                                 relief='flat', bd=0, highlightthickness=1,
                                 highlightbackground=BORDER, highlightcolor=ACCENT,
                                 padx=12, pady=9)
-        self.log.pack(fill='x')
-        ttk.Label(shell, style='Footer.TLabel',
-                  text='Close the UE phone app before connecting. Closing this window leaves an active group playing.').pack(
+        self.footer_note = ttk.Label(shell, style='Footer.TLabel',
+                  text='Close the phone app before connecting. Your group keeps playing when you close this window.')
+        self.footer_note.pack(
                       anchor='w', pady=(4, 0))
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.update_enabled()
@@ -192,21 +222,188 @@ class PartyUpApp:
             self.feature_widgets.setdefault(feature, []).append(button)
         return button
 
+    def scale(self, parent, **options):
+        return ttk.Scale(parent, **options)
+
     def register(self, widget, feature=None, state='normal'):
         self.controls.append((widget, state))
         if feature:
             self.feature_widgets.setdefault(feature, []).append(widget)
         return widget
 
+    def build_guide(self, tab):
+        ttk.Label(tab, text='FIELD GUIDE', style='Section.TLabel').pack(anchor='w')
+        ttk.Label(tab, text='What each control does, where to find it, and what still needs testing.',
+                  style='Muted.TLabel').pack(anchor='w', pady=(4, 12))
+        guide_list = ttk.Frame(tab)
+        guide_list.pack(fill='x')
+        self.guide_tree = ttk.Treeview(guide_list, columns=('name', 'status'), show='headings', height=7)
+        self.guide_tree.heading('name', text='Feature')
+        self.guide_tree.heading('status', text='Current PC support')
+        self.guide_tree.column('name', width=390)
+        self.guide_tree.column('status', width=380)
+        guide_scroll = ttk.Scrollbar(guide_list, orient='vertical', command=self.guide_tree.yview)
+        self.guide_tree.configure(yscrollcommand=guide_scroll.set)
+        guide_scroll.pack(side='right', fill='y')
+        self.guide_tree.pack(side='left', fill='x', expand=True)
+        for index, entry in enumerate(FEATURE_GUIDE):
+            self.guide_tree.insert('', 'end', iid=str(index), values=(entry.name, entry.status))
+        self.guide_detail = tk.StringVar()
+        ttk.Label(tab, textvariable=self.guide_detail, wraplength=860,
+                  justify='left', padding=(0, 12)).pack(fill='x')
+        self.guide_tree.bind('<<TreeviewSelect>>', self.show_guide_entry)
+        actions = ttk.Frame(tab)
+        actions.pack(fill='x')
+        self.guide_open = ttk.Button(actions, text='Go to control', command=self.open_guide_control)
+        self.guide_open.pack(side='left')
+        ttk.Button(actions, text='Official EVERBOOM guide', command=self.open_official_guide).pack(side='left', padx=8)
+        self.guide_tree.selection_set('0')
+        self.show_guide_entry()
+
+    def show_guide_entry(self, _=None):
+        selected = self.guide_tree.selection()
+        if not selected:
+            return
+        entry = FEATURE_GUIDE[int(selected[0])]
+        self.guide_detail.set(entry.detail)
+        self.guide_open.configure(state='normal' if entry.page else 'disabled')
+
+    def open_guide_control(self):
+        selected = self.guide_tree.selection()
+        if selected:
+            page = FEATURE_GUIDE[int(selected[0])].page
+            if page:
+                self.notebook.select(self.tab_viewports[page])
+
+    @staticmethod
+    def open_official_guide():
+        import webbrowser
+        webbrowser.open(UE_GUIDE)
+
+    def save_eq_memory(self):
+        if self.busy:
+            return
+        if self.selected_snapshot.get('eq') is None or not self.eq_choices:
+            self.status.set('Read supported EQ before saving a memory.')
+            return
+        try:
+            name = self.memory_combo.get().strip()
+            index = self.eq_combo.current()
+            if not 0 <= index < len(self.eq_choices):
+                raise ValueError('Choose an advertised EQ preset before saving.')
+            self.eq_profiles.save(name, tuple(round(value.get()) for value in self.eq_bands),
+                                  mode=self.eq_choices[index][1])
+            self.memory_combo.configure(values=list(self.eq_profiles.load()))
+            self.status.set(f'Saved “{name}” on this PC. No speaker command sent.')
+        except (OSError, ValueError) as exc:
+            self.status.set(str(exc))
+
+    def load_eq_memory(self):
+        if self.busy:
+            return
+        if not self.eq_choices or self.selected_snapshot.get('eq') is None:
+            self.status.set('Read supported EQ before loading a memory.')
+            return
+        record = self.eq_profiles.records().get(self.memory_combo.get().strip())
+        if record is None:
+            self.status.set('Choose a saved EQ memory first.')
+            return
+        target = next((index for index, (_, code) in enumerate(self.eq_choices) if code == record['mode']), None)
+        if target is None:
+            self.status.set('This speaker does not advertise the saved EQ preset. Nothing loaded.')
+            return
+        self.eq_combo.current(target)
+        for variable, value in zip(self.eq_bands, record['bands']):
+            variable.set(value)
+        self.status.set('Memory loaded into sliders. Press Apply EQ to send it to the speaker.')
+
+    def delete_eq_memory(self):
+        if self.busy:
+            return
+        try:
+            self.eq_profiles.delete(self.memory_combo.get().strip())
+            self.memory_combo.set('')
+            self.memory_combo.configure(values=list(self.eq_profiles.load()))
+            self.status.set('Local EQ memory deleted. Speaker settings unchanged.')
+        except (OSError, ValueError) as exc:
+            self.status.set(str(exc))
+
+    def control_member(self):
+        if self.busy:
+            return
+        selected = self.member_tree.selection()
+        if len(selected) != 1 or selected[0] not in self.member_speakers:
+            self.status.set('Select one group member to control.')
+            return
+        speaker = self.member_speakers[selected[0]]
+        index = next((i for i, item in enumerate(self.speakers) if item.address == speaker.address), None)
+        if index is None:
+            return
+        self.device_combo.current(index)
+        self.notebook.select(self.tab_viewports['Sound'])
+        self.device_changed()
+
+    def sync_group_volume(self):
+        if self.busy:
+            return
+        try:
+            host, experimental = self.host(), self.experimental.get()
+        except ValueError as exc:
+            self.status.set(str(exc))
+            return
+        async def synchronize():
+            from .controls import settings_session
+            async with settings_session(host, experimental=experimental) as settings:
+                await settings.sync_volume()
+            return 'Group volume sync accepted. Confirm levels by listening; this does not adjust audio/video timing.'
+        self.worker('message', lambda: asyncio.run(synchronize()))
+
+    def begin_guest_drag(self, event):
+        self.dragged_speaker = None
+        if self.busy or not self.guest_choices:
+            return
+        index = self.guest_list.nearest(event.y)
+        bounds = self.guest_list.bbox(index)
+        if bounds and bounds[1] <= event.y <= bounds[1] + bounds[3]:
+            self.dragged_speaker = ('add', self.guest_choices[index], event.x_root, event.y_root)
+
+    def begin_member_drag(self, event):
+        self.dragged_speaker = None
+        if self.busy:
+            return
+        key = self.member_tree.identify_row(event.y)
+        speaker = self.member_speakers.get(key)
+        if speaker is not None and speaker.address != self.host().address:
+            self.dragged_speaker = ('remove', speaker, event.x_root, event.y_root)
+
+    def finish_speaker_drag(self, event):
+        dragged, self.dragged_speaker = self.dragged_speaker, None
+        if dragged is None or self.busy:
+            return
+        action, speaker, start_x, start_y = dragged
+        if abs(event.x_root - start_x) + abs(event.y_root - start_y) < 12:
+            return
+        target = self.member_tree if action == 'add' else self.guest_list
+        left, top = target.winfo_rootx(), target.winfo_rooty()
+        if target.winfo_ismapped() and left <= event.x_root < left + target.winfo_width() and top <= event.y_root < top + target.winfo_height():
+            self.group_action(action, guests_override=[speaker])
+
     def build_group(self, tab):
-        ttk.Label(tab, text='GROUP ROUTING', style='Section.TLabel').pack(anchor='w')
-        ttk.Label(tab, text='Choose a main audio source and up to nine guests. The speakers distribute audio themselves.',
+        ttk.Label(tab, text='PARTY SLOTS / YOUR SELECTION', style='Section.TLabel').pack(anchor='w')
+        ttk.Label(tab, text='Play through your main speaker. Add the rooms you want to hear it in.',
                   style='Muted.TLabel', wraplength=990).pack(anchor='w', pady=(2, 10))
+        self.pixel_group = PixelGroupMap(tab)
+        self.pixel_group.pack(fill='x', pady=(0, 8))
         route = ttk.Frame(tab, style='Toolbar.TFrame', padding=(10, 6))
         route.pack(fill='x')
-        ttk.Label(route, text='01  WINDOWS AUDIO SOURCE      →      02  PARTYUP RECEIVERS',
+        ttk.Label(route, text='PC AUDIO   →   MAIN SPEAKER   →   YOUR GROUP',
                   style='ToolbarMuted.TLabel').pack(side='left')
         ttk.Label(route, textvariable=self.group_status, style='GroupState.TLabel').pack(side='right')
+        audio_row = ttk.Frame(tab)
+        audio_row.pack(fill='x', pady=(6, 0))
+        self.audio_route_text = tk.StringVar(value='Windows output: not checked. Use your main speaker for PC audio.')
+        ttk.Label(audio_row, textvariable=self.audio_route_text, style='Muted.TLabel', wraplength=720).pack(side='left', fill='x', expand=True)
+        self.button(audio_row, 'Check PC output', self.check_audio_output, variant='Quiet.TButton').pack(side='right')
         top = ttk.Frame(tab)
         top.pack(fill='x', pady=10)
         ttk.Label(top, text='Main speaker').pack(side='left', padx=(0, 8))
@@ -216,10 +413,10 @@ class PartyUpApp:
         ttk.Label(top, textvariable=self.group_count, style='Count.TLabel').pack(side='left', padx=16)
         body = ttk.Frame(tab)
         body.pack(fill='both', expand=True)
-        available = ttk.LabelFrame(body, text='Available paired speakers', padding=8)
+        available = ttk.LabelFrame(body, text='Add speakers', padding=12)
         available.pack(side='left', fill='both', padx=(0, 12))
         self.guest_list = self.register(tk.Listbox(available, selectmode='multiple', exportselection=False,
-                                                 height=12, width=33, font=('Segoe UI', 10)))
+                                                 height=9, width=28, font=('Segoe UI', 11)))
         self.guest_list.configure(bg=INPUT, fg=INK, selectbackground='#286A60',
                                   selectforeground='#FFFFFF', borderwidth=0,
                                   relief='flat', highlightthickness=1,
@@ -227,24 +424,32 @@ class PartyUpApp:
                                   activestyle='none')
         self.guest_list.pack(fill='both', expand=True, padx=2, pady=3)
         self.guest_list.bind('<<ListboxSelect>>', self.guests_changed)
-        ttk.Label(available, text='Click a speaker to select or deselect it.\nSelections are remembered locally.',
-                  wraplength=285).pack(anchor='w', pady=(7, 0))
-        members = ttk.LabelFrame(body, text='Group and member results', padding=8)
+        self.guest_list.bind('<ButtonPress-1>', self.begin_guest_drag, add='+')
+        self.guest_list.bind('<ButtonRelease-1>', self.finish_speaker_drag, add='+')
+        ttk.Label(available, text='Select guests, then Start. Or drag one into Your group to join.',
+                  style='Muted.TLabel', wraplength=240).pack(anchor='w', pady=(10, 0))
+        members = ttk.LabelFrame(body, text='Your group', padding=12)
         members.pack(side='left', fill='both', expand=True)
         self.member_tree = self.register(ttk.Treeview(members, columns=('role', 'speaker', 'state', 'battery'),
-                                                    show='headings', selectmode='extended', height=10))
+                                                    show='headings', selectmode='extended', height=7))
         for key, label, width in [('role', 'Role', 55), ('speaker', 'Speaker', 210),
-                                  ('state', 'Last confirmed result', 240), ('battery', 'Battery', 100)]:
+                                  ('state', 'Latest result', 215), ('battery', 'Battery', 100)]:
             self.member_tree.heading(key, text=label)
             self.member_tree.column(key, width=width, minwidth=45, stretch=key != 'role')
         self.member_tree.tag_configure('confirmed', foreground=ACCENT)
         self.member_tree.tag_configure('uncertain', foreground='#E8B76B')
         self.member_tree.pack(fill='both', expand=True)
         self.member_tree.bind('<<TreeviewSelect>>', self.member_selected)
+        self.member_tree.bind('<ButtonPress-1>', self.begin_member_drag, add='+')
+        self.member_tree.bind('<ButtonRelease-1>', self.finish_speaker_drag, add='+')
         self.member_detail = tk.StringVar(value='Select a member to see its detailed result.')
         ttk.Label(members, textvariable=self.member_detail, wraplength=650).pack(anchor='w', pady=8)
         self.button(members, 'Remove selected members', lambda: self.group_action('remove', from_members=True),
                     variant='Quiet.TButton').pack(anchor='w')
+        quick = ttk.Frame(members)
+        quick.pack(fill='x', pady=(8, 0))
+        self.button(quick, 'Control selected speaker', self.control_member, variant='Quiet.TButton').pack(side='left')
+        self.button(quick, 'Sync group volume', self.sync_group_volume, variant='Quiet.TButton').pack(side='left', padx=8)
         channel_row = ttk.Frame(members)
         channel_row.pack(fill='x', pady=(8, 0))
         ttk.Label(channel_row, text='Selected guest channel:').pack(side='left')
@@ -264,8 +469,8 @@ class PartyUpApp:
                        'status': 'Quiet.TButton'}.get(action)
             self.button(actions, label, lambda action=action: self.group_action(action),
                         variant=variant).pack(side='left', padx=(0, 8))
-        ttk.Label(tab, text='A successful write is shown separately from a receiver report. Confirm playback by listening. '
-                  'Older models are experimental until tested on the exact hardware.', wraplength=995).pack(anchor='w', pady=(10, 0))
+        ttk.Label(tab, text='Receiver reports confirm a control connection. Listen to confirm playback.',
+                  style='Muted.TLabel', wraplength=995).pack(anchor='w', pady=(10, 0))
 
     def build_device(self, tab):
         ttk.Label(tab, text='SPEAKER CONTROL', style='Section.TLabel').pack(anchor='w')
@@ -285,6 +490,12 @@ class PartyUpApp:
         self.button(battery, 'Power off', lambda: self.setting('power_off',
                     silent=self.silent_power.get() and not self.selected_snapshot.get('experimental', False)),
                     'power', variant='Danger.TButton').pack(side='left')
+        wake = ttk.Frame(tab)
+        wake.pack(fill='x', pady=(0, 10))
+        self.register(ttk.Checkbutton(wake, text='Enable preview BLE wake', variable=self.experimental_wake,
+                                     command=self.update_enabled)).pack(side='left')
+        self.button(wake, 'Wake speaker', self.wake_selected, 'wake', variant='Quiet.TButton').pack(side='left', padx=8)
+        ttk.Label(wake, text='Requires remote activation. Hardware test pending.', style='Muted.TLabel').pack(side='left')
         behavior = ttk.LabelFrame(tab, text='Speaker behavior', padding=10)
         behavior.pack(fill='x', pady=(0, 10))
         remote = self.register(ttk.Checkbutton(behavior, text='Remote activation', variable=self.remote_activation), 'remote_activation')
@@ -323,17 +534,24 @@ class PartyUpApp:
                   style='Muted.TLabel').pack(anchor='w', pady=(3, 5))
         ttk.Label(tab, textvariable=self.sound_hint, style='Micro.TLabel',
                   wraplength=955).pack(anchor='w', pady=(0, 13))
-        volume = ttk.LabelFrame(tab, text='Speaker volume', padding=10)
+        volume = ttk.LabelFrame(tab, text='Speaker volume', padding=16)
         volume.pack(fill='x', pady=(0, 10))
-        self.volume_scale = self.register(ttk.Scale(volume, from_=0, to=31, variable=self.volume), 'volume')
-        self.volume_scale.pack(side='left', fill='x', expand=True, padx=(0, 10))
-        self.volume_scale.bind('<ButtonRelease-1>', self.on_volume_release)
-        self.volume_scale.bind('<KeyRelease>', self.on_volume_release)
+        volume_heading = ttk.Frame(volume)
+        volume_heading.pack(fill='x', pady=(0, 8))
         self.volume_text = tk.StringVar(value='Unknown')
-        ttk.Label(volume, textvariable=self.volume_text, width=19).pack(side='left')
+        ttk.Label(volume_heading, textvariable=self.volume_text,
+                  style='Volume.TLabel').pack(side='left')
+        self.button(volume_heading, 'Set volume', self.apply_volume, 'volume').pack(side='right')
+        self.volume_scale = self.register(self.scale(volume, from_=0, to=31, variable=self.volume), 'volume')
+        self.volume_scale.pack(fill='x', pady=(2, 8))
+        self.volume_scale.bind('<ButtonRelease-1>', self.on_volume_release, add='+')
+        self.volume_scale.bind('<KeyRelease>', self.on_volume_release, add='+')
         self.volume.trace_add('write', lambda *_: self.update_volume_label())
-        self.button(volume, 'Set volume', self.apply_volume, 'volume').pack(side='left')
-        eq = ttk.LabelFrame(tab, text='EQ preset and custom EQ', padding=10)
+        volume_ends = ttk.Frame(volume)
+        volume_ends.pack(fill='x')
+        ttk.Label(volume_ends, text='Quiet', style='Muted.TLabel').pack(side='left')
+        ttk.Label(volume_ends, text='Loud', style='Muted.TLabel').pack(side='right')
+        eq = ttk.LabelFrame(tab, text='Shape your sound', padding=16)
         eq.pack(fill='x', pady=(0, 10))
         top = ttk.Frame(eq)
         top.pack(fill='x')
@@ -341,21 +559,30 @@ class PartyUpApp:
         self.eq_combo = self.register(ttk.Combobox(top, state='readonly', width=30), 'eq', state='readonly')
         self.eq_combo.pack(side='left', padx=(0, 10))
         self.button(top, 'Apply EQ', self.apply_eq, 'eq').pack(side='left')
+        memories = ttk.Frame(eq)
+        memories.pack(fill='x', pady=(12, 0))
+        ttk.Label(memories, text='EQ memory:').pack(side='left')
+        self.memory_combo = self.register(ttk.Combobox(memories, width=20,
+                                                       values=list(self.eq_profiles.load())))
+        self.memory_combo.pack(side='left', padx=8)
+        self.button(memories, 'Save', self.save_eq_memory, 'eq', variant='Quiet.TButton').pack(side='left')
+        self.button(memories, 'Load into sliders', self.load_eq_memory, 'eq', variant='Quiet.TButton').pack(side='left', padx=6)
+        self.button(memories, 'Delete', self.delete_eq_memory, variant='Quiet.TButton').pack(side='left')
         bands = ttk.Frame(eq)
-        bands.pack(fill='x', pady=12)
+        bands.pack(fill='x', pady=(18, 4))
         for number, value in enumerate(self.eq_bands, 1):
             box = ttk.Frame(bands)
             box.pack(side='left', fill='x', expand=True, padx=6)
             ttk.Label(box, text=f'Band {number}').pack()
-            scale = self.register(ttk.Scale(box, from_=127, to=-128,
-                                            orient='vertical', variable=value), 'eq_band')
-            scale.pack()
-            scale.bind('<ButtonRelease-1>', self.on_eq_band_release)
-            scale.bind('<KeyRelease>', self.on_eq_band_release)
+            scale = self.register(self.scale(box, from_=127, to=-128,
+                                            orient='vertical', length=150, variable=value), 'eq_band')
+            scale.pack(pady=10)
+            scale.bind('<ButtonRelease-1>', self.on_eq_band_release, add='+')
+            scale.bind('<KeyRelease>', self.on_eq_band_release, add='+')
             self.eq_band_scales.append(scale)
             label = tk.StringVar(value='0')
             value.trace_add('write', lambda *_, value=value, label=label: label.set(str(round(value.get()))))
-            ttk.Label(box, textvariable=label).pack()
+            ttk.Label(box, textvariable=label, style='Value.TLabel').pack()
         outdoor = ttk.LabelFrame(tab, text='Outdoor mode', padding=10)
         outdoor.pack(fill='x')
         self.register(ttk.Checkbutton(outdoor, text='Outdoor mode', variable=self.outdoor), 'outdoor').pack(side='left')
@@ -394,17 +621,32 @@ class PartyUpApp:
         balance = ttk.Frame(stereo)
         balance.pack(fill='x')
         ttk.Label(balance, text='Protocol value:').pack(side='left')
-        self.register(ttk.Scale(balance, from_=-128, to=127, variable=self.balance), 'stereo_balance').pack(side='left', fill='x', expand=True, padx=10)
+        self.register(self.scale(balance, from_=-128, to=127, variable=self.balance), 'stereo_balance').pack(side='left', fill='x', expand=True, padx=10)
         self.button(balance, 'Apply balance', lambda: self.setting('set_stereo_balance', round(self.balance.get())), 'stereo_balance').pack(side='left', padx=10)
         ttk.Label(tab, text='Balance direction and current-value readback have not been established. '
                   'Balance writes require a supported model and explicit experimental opt-in. '
                   'Mixed-model grouping and groups larger than two still require hardware acceptance.', wraplength=995).pack(anchor='w', pady=10)
 
     def append_log(self, text):
+        follow_tail = self.activity_visible and self.log.yview()[1] >= .999
         self.log.configure(state='normal')
         self.log.insert('end', f'{datetime.now():%H:%M:%S}  {text}\n')
-        self.log.see('end')
+        excess = int(self.log.index('end-1c').split('.')[0]) - 1 - MAX_LOG_LINES
+        if excess > 0:
+            self.log.delete('1.0', f'{excess+1}.0')
+        if follow_tail:
+            self.log.see('end')
         self.log.configure(state='disabled')
+
+    def toggle_activity(self):
+        """Keep detailed diagnostics available without crowding the workspace."""
+        self.activity_visible = not self.activity_visible
+        if self.activity_visible:
+            self.log.pack(fill='x', before=self.footer_note)
+            self.log.see('end')
+        else:
+            self.log.pack_forget()
+        self.activity_button.configure(text='▾  Hide activity' if self.activity_visible else '▸  Show activity')
 
     def worker(self, kind, task):
         if self.busy:
@@ -414,8 +656,8 @@ class PartyUpApp:
         def execute():
             try:
                 self.events.put((kind, task()))
-            except Exception as exc:
-                self.events.put(('error', str(exc)))
+            except (Exception, asyncio.CancelledError) as exc:
+                self.events.put(('error', str(exc) or 'Bluetooth operation canceled.'))
         threading.Thread(target=execute, daemon=True).start()
 
     def progress(self, message):
@@ -496,6 +738,7 @@ class PartyUpApp:
         self.member_tree.delete(*self.member_tree.get_children())
         self.member_speakers = {}
         self.group_status.set('STATUS NOT CHECKED')
+        self.audio_route_text.set('Windows output: not checked. Use your main speaker for PC audio.')
         self.member_detail.set('Check group to load results for the selected main speaker.')
         self.update_enabled()
 
@@ -503,6 +746,7 @@ class PartyUpApp:
         count = len(self.guest_list.curselection())
         total = count + int(0 <= self.host_combo.current() < len(self.speakers))
         self.group_count.set(f'{count} guests selected · {total} total · maximum 10')
+        self.pixel_group.show(total > count, min(count, 9))
         if count > 9:
             self.status.set('Choose at most nine guests before starting or changing the group.')
         self.remember()
@@ -563,10 +807,10 @@ class PartyUpApp:
         except ValueError as exc:
             self.status.set(str(exc))
 
-    def group_action(self, action, from_members=False):
+    def group_action(self, action, from_members=False, guests_override=None):
         try:
             host = self.host()
-            guests = self.selected_guests()
+            guests = self.selected_guests() if guests_override is None else list(guests_override)
             if from_members:
                 guests = [self.member_speakers[item] for item in self.member_tree.selection()
                           if item in self.member_speakers and self.member_speakers[item].address != host.address]
@@ -582,13 +826,41 @@ class PartyUpApp:
         except ValueError as exc:
             self.status.set(str(exc))
 
+    def wake_selected(self):
+        if self.busy or not self.experimental_wake.get():
+            return
+        try:
+            speaker = self.selected_device()
+            if speaker.experimental:
+                raise ValueError('Preview wake is currently limited to EVERBOOM.')
+        except ValueError as exc:
+            self.status.set(str(exc))
+            return
+        from .wake import wake_speaker
+        self.status.set('Sending the source-backed BLE wake request…')
+        self.worker('message', lambda: asyncio.run(wake_speaker(speaker)))
+
+    def check_audio_output(self):
+        if self.busy:
+            return
+        try:
+            host = self.host()
+            guests = [speaker.address for speaker in self.selected_guests()]
+        except ValueError as exc:
+            self.status.set(str(exc))
+            return
+        from .audio_route import inspect_audio_route
+        self.status.set('Checking the default Windows audio output…')
+        self.worker('audio_route', lambda: inspect_audio_route(host.address, guests))
+
     def read_controls(self):
         try:
             speaker, experimental = self.selected_device(), self.experimental.get()
             self.status.set(f'Reading controls from {speaker.label}…')
+            group_host = self.host().address
             async def inspect():
                 from .controls import settings_session
-                async with settings_session(speaker, experimental=experimental) as settings:
+                async with settings_session(speaker, experimental=experimental, group_host=group_host) as settings:
                     return speaker, await settings.snapshot()
             self.worker('snapshot', lambda: asyncio.run(inspect()))
         except ValueError as exc:
@@ -601,10 +873,11 @@ class PartyUpApp:
             if speaker.experimental:
                 self.sound_hint.set('Use Read controls for experimental speaker capabilities.')
                 return
+            group_host = self.host().address
             async def inspect():
                 from .controls import settings_session
                 from .session import UnsupportedFeature
-                async with settings_session(speaker) as settings:
+                async with settings_session(speaker, group_host=group_host) as settings:
                     readout = {'capabilities': {}, 'errors': {}, 'max_volume': 31}
                     getters = {'volume': settings.volume, 'eq': settings.eq,
                                'supported_eq_modes': settings.eq_modes}
@@ -637,23 +910,26 @@ class PartyUpApp:
                 raise ValueError('Read this speaker’s controls before changing a setting.')
             self.remember()
             self.status.set(f'Applying {method.replace("_", " ")} to {speaker.label}…')
+            group_host = self.host().address
             async def apply():
                 from .controls import settings_session
-                async with settings_session(speaker, experimental=experimental) as settings:
+                async with settings_session(speaker, experimental=experimental, group_host=group_host) as settings:
                     await getattr(settings, method)(*args, **kwargs)
                     if method == 'power_off':
                         return speaker, {'powered_off': True, 'capabilities': {}, 'errors': {}}
-                    if method in ('set_volume', 'set_eq'):
-                        # Only re-read the changed field. The old full snapshot ran
-                        # many slow unrelated queries and obscured working sliders.
-                        field = 'volume' if method == 'set_volume' else 'eq'
+                    if method in SETTING_READBACK:
+                        # Verify only the changed setting, not every device feature.
+                        field = SETTING_READBACK[method]
                         try:
                             confirmed = await getattr(settings, field)()
                         except Exception as error:
                             return speaker, field, None, str(error)
                         return speaker, field, confirmed, None
+                    if method in ACK_ONLY_ACTIONS:
+                        return f'{speaker.label}: {method.replace("_", " ")} command accepted. Effect not independently verified.'
                     return speaker, await settings.snapshot()
-            event = 'adjusted' if method in ('set_volume', 'set_eq') else 'snapshot'
+            event = ('adjusted' if method in SETTING_READBACK else
+                     'message' if method in ACK_ONLY_ACTIONS else 'snapshot')
             self.worker(event, lambda: asyncio.run(apply()))
         except ValueError as exc:
             self.status.set(str(exc))
@@ -759,6 +1035,11 @@ class PartyUpApp:
             capabilities = {item: True for item in capabilities}
         for feature, widgets in self.feature_widgets.items():
             available = bool(capabilities.get(feature))
+            if feature == 'wake':
+                try:
+                    available = self.experimental_wake.get() and not self.selected_device().experimental
+                except ValueError:
+                    available = False
             if feature == 'silent_power':
                 available = bool(capabilities.get('power')) and not self.selected_snapshot.get('experimental', False)
             if feature == 'stereo_balance':
@@ -789,6 +1070,7 @@ class PartyUpApp:
         except ValueError:
             channel_allowed = False
         self.channel_button.configure(state='normal' if channel_allowed else 'disabled')
+        self.update_tuning_controls()
 
     @staticmethod
     def set_widget_state(widget, state):
@@ -798,6 +1080,7 @@ class PartyUpApp:
             widget.configure(state=state)
 
     def render_snapshot(self, speaker, snapshot):
+        self.tuning.observe(speaker.address, snapshot.get('eq'))
         self.selected_snapshot = snapshot
         if snapshot:
             self.snapshots[speaker.address] = snapshot
@@ -923,8 +1206,19 @@ class PartyUpApp:
 
     def poll(self):
         try:
-            while True:
+            self._poll_events()
+        except Exception:
+            import logging
+            logging.getLogger('partyup').exception('Worker result handling failed')
+            self.status.set('A result could not be displayed. Check the local app log.')
+            self.root.after(IDLE_POLL_MS,self.poll)
+
+    def _poll_events(self):
+        processed = 0
+        try:
+            while processed < MAX_EVENTS_PER_TICK:
                 kind, result = self.events.get_nowait()
+                processed += 1
                 if kind == 'progress':
                     self.status.set(result)
                     self.append_log(result)
@@ -940,11 +1234,21 @@ class PartyUpApp:
                     self.show_discovery(*result)
                 elif kind == 'group':
                     self.show_group(result)
+                elif kind == 'audio_route':
+                    role = result['role']
+                    message = {'main': 'matches your main speaker', 'guest': 'matches a selected guest; check your Windows output',
+                               'other': 'does not match the selected speakers; check your Windows output'}[role]
+                    self.audio_route_text.set(f'{result["name"]}: {message}. Per-app output overrides are not checked.')
+                    self.status.set('Default Windows output checked. No audio settings changed.')
                 elif kind == 'message':
                     self.status.set(str(result) if result else 'Channel command accepted; confirm playback by listening.')
                     self.append_log(self.status.get())
+                elif kind == 'tuning':
+                    self.accept_tuning(result)
                 elif kind == 'sound_snapshot':
                     speaker, snapshot = result
+                    if self.selected_device().address == speaker.address:
+                        self.tuning.observe(speaker.address, snapshot.get('eq'), fresh=True)
                     self.snapshots[speaker.address] = snapshot
                     if self.selected_device().address == speaker.address:
                         self.render_snapshot(speaker, snapshot)
@@ -974,6 +1278,8 @@ class PartyUpApp:
                     self.append_log(message)
                 elif kind == 'snapshot':
                     speaker, snapshot = result
+                    if self.selected_device().address == speaker.address:
+                        self.tuning.observe(speaker.address, snapshot.get('eq'), fresh=True)
                     self.snapshots[speaker.address] = snapshot
                     name = snapshot.get('name')
                     if name:
@@ -993,7 +1299,10 @@ class PartyUpApp:
                 self.update_enabled()
         except queue.Empty:
             pass
-        self.root.after(100, self.poll)
+        # This polls only the worker queue, never the speakers. Idle windows
+        # need fewer wakeups; bounded batches keep bursts from starving Tk.
+        delay = 10 if processed == MAX_EVENTS_PER_TICK else BUSY_POLL_MS if self.busy else IDLE_POLL_MS
+        self.root.after(delay, self.poll)
 
     def close(self):
         if self.busy:
@@ -1002,9 +1311,15 @@ class PartyUpApp:
             self.root.destroy()
 
 
-def main(smoke=False):
+def main(smoke=False, logger=None):
+    from .classroom_view import ClassroomApp
     root = tk.Tk()
-    app = PartyUpApp(root)
+    app = ClassroomApp(root)
+    if logger is not None:
+        def callback_error(kind,error,traceback):
+            logger.error('Interface callback failed',exc_info=(kind,error,traceback))
+            app.status.set('An interface action failed. Details are in the local app log.')
+        root.report_callback_exception=callback_error
     if smoke:
         root.withdraw()
         root.after(150, root.destroy)

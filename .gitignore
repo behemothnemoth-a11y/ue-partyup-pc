@@ -10,3 +10,10 @@ btsnoop*
 bugreport*
 dist/
 build/
+
+*.apk
+*.pcap
+*.pcapng
+.env
+.env.*
+

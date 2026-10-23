@@ -19,7 +19,8 @@ def discover():
     import json, re
     from pathlib import Path
     try:
-        known = json.loads((Path(__file__).resolve().parents[1]/'data'/'devices.json').read_text())
+        from .runtime import data_directory
+        known = json.loads((data_directory()/'devices.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
         known = {}
     if not isinstance(known, dict):
