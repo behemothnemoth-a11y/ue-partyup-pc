@@ -2,14 +2,14 @@
 
 Independent Windows desktop controller for Ultimate Ears PartyUp, with one main speaker and up to nine guests.
 
-**Experimental Windows alpha candidate, version 0.7.4. Publication pending owner approval.** Two EVERBOOMs have been tested with PC audio and a Start → Stop → Start cycle in the earlier controller. The expanded ten-speaker workflow, new controls and older-speaker adapter have automated tests; physical acceptance remains model- and control-specific. The repository stays private until the owner approves publication. Not affiliated with Logitech or Ultimate Ears.
+**Experimental Windows alpha candidate, version 0.7.5. Publication pending owner approval.** Two EVERBOOMs have been tested with PC audio and a Start → Stop → Start cycle in the earlier controller. The expanded ten-speaker workflow, new controls and older-speaker adapter have automated tests; physical acceptance remains model- and control-specific. The repository stays private until the owner approves publication. Not affiliated with Logitech or Ultimate Ears.
 
 ## Alpha support and known limits
 
 Tested hardware: one pair of EVERBOOMs on Windows. Up to ten selected speakers are software-tested; larger physical groups and older BOOM/MEGABOOM models remain unverified. This is music grouping, not discrete surround sound.
 
-- Guest reads/settings/EQ controls are blocked while the selected main reports active PartyUp. Stop the group explicitly before controlling a guest. A failed or malformed main-state check also blocks guest access.
-- Remember PartyUp group changes are blocked while broadcasting. Live changes previously interrupted playback; the underlying cause is unresolved.
+- Guest reads/settings/EQ controls are disabled while the selected main reports active PartyUp or group state is unchecked. Stop PartyUp and use Check group to confirm it is off before these controls unlock. Stop the group explicitly before controlling a guest. A failed or malformed main-state check also blocks guest access.
+- Remember PartyUp group controls are disabled while broadcasting or unchecked. Live changes previously interrupted playback; the underlying cause is unresolved.
 - A missing receiver report is unknown membership, not proof that a guest is disconnected. Listen to confirm playback.
 - Outdoor lookup can time out; stereo balance readback is undecoded. Wake, power-cycle persistence, actual sleep timing, channel acoustics and older models lack complete hardware acceptance.
 - No measured audio/video delay correction is included. This unsigned alpha may prompt Windows security notices.
@@ -19,7 +19,7 @@ See [release checks](docs/RELEASE-AUDIT.md), [testing](docs/TESTING.md), [privac
 
 ## Standalone Windows app
 
-Version 0.7.4 includes a standalone Windows x64 folder bundle; Python is not needed on the receiving PC. Extract the complete private release ZIP and run Install Private.cmd to install for the current user, then open PartyUp PC from the Start menu. No admin rights, automatic startup, telemetry or automatic updates are used. The bundle is an unsigned private preview.
+Version 0.7.5 includes a standalone Windows x64 folder bundle; Python is not needed on the receiving PC. Extract the complete private release ZIP and run Install Private.cmd to install for the current user, then open PartyUp PC from the Start menu. No admin rights, automatic startup, telemetry or automatic updates are used. The bundle is an unsigned private preview.
 
 Settings live in `%LOCALAPPDATA%/PartyUpPC/data`; bounded redacted failure logs live in its `logs` folder. Versioned app files live under `%LOCALAPPDATA%/Programs/PartyUpPC`. Source and packaged launches share the same settings location and single-instance guard. On a source launch, missing settings are imported from the old project data directory without overwriting current files. The installer also accepts an explicit `--import-settings` directory for a local migration. User data is never bundled.
 

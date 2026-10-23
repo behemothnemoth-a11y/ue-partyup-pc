@@ -90,6 +90,7 @@ class PartyUpApp(TuningUI):
         self.guest_choices = []
         self.member_speakers = {}
         self.snapshots = {}
+        self.broadcast_states = {}
         self.radios = []
         self.selected_snapshot = {}
         self.eq_choices = []
@@ -165,7 +166,7 @@ class PartyUpApp(TuningUI):
         self.device_combo.pack(side='left', fill='x', expand=True)
         self.controls.append((self.device_combo, 'readonly'))
         self.device_combo.bind('<<ComboboxSelected>>', self.device_changed)
-        self.button(toolbar_controls, 'Read controls', self.read_controls).pack(side='left', padx=(12, 0))
+        self.button(toolbar_controls, 'Read controls', self.read_controls, 'read_controls').pack(side='left', padx=(12, 0))
 
         self.notebook = ttk.Notebook(shell)
         self.notebook.pack(fill='both', expand=True, pady=(1, 10))
@@ -598,6 +599,8 @@ class PartyUpApp(TuningUI):
                   style='Muted.TLabel', wraplength=995).pack(anchor='w', pady=(3, 14))
         general = ttk.LabelFrame(tab, text='Group preferences', padding=10)
         general.pack(fill='x', pady=(0, 10))
+        ttk.Label(general, text='Remember group is disabled while PartyUp is on or unchecked. Stop PartyUp, then Check group to unlock it.',
+                  wraplength=850, style='Muted.TLabel').pack(fill='x', pady=(0, 8))
         self.register(ttk.Checkbutton(general, text='Remember PartyUp group', variable=self.sticky), 'sticky').pack(side='left')
         self.button(general, 'Apply group preference', lambda: self.setting('set_sticky', self.sticky.get()), 'sticky').pack(side='left', padx=10)
         self.button(general, 'Synchronize group volume', lambda: self.setting('sync_volume'), 'partyup').pack(side='left', padx=10)
@@ -820,6 +823,7 @@ class PartyUpApp(TuningUI):
                 raise ValueError('Select no more than nine guests.')
             experimental = self.experimental.get()
             self.remember()
+            if action != 'status': self.broadcast_states[host.address] = None
             self.status.set(f'PartyUp {action} in progress…')
             self.worker('group', lambda: asyncio.run(GroupManager().run(action, host, guests, self.progress,
                                                                         experimental=experimental)))
@@ -1025,6 +1029,20 @@ class PartyUpApp(TuningUI):
             return
         self.setting('identify', signal=('blink', 'solid', 'alternate')[index])
 
+    def guest_controls_locked(self):
+        try:
+            host = self.host()
+            return (self.selected_device().address != host.address and
+                    self.broadcast_states.get(host.address) is not False)
+        except ValueError:
+            return True
+
+    def group_preference_locked(self):
+        try:
+            return self.broadcast_states.get(self.host().address) is not False
+        except ValueError:
+            return True
+
     def update_enabled(self):
         for widget, idle_state in self.controls:
             self.set_widget_state(widget, 'disabled' if self.busy else idle_state)
@@ -1034,7 +1052,7 @@ class PartyUpApp(TuningUI):
         if not isinstance(capabilities, dict):
             capabilities = {item: True for item in capabilities}
         for feature, widgets in self.feature_widgets.items():
-            available = bool(capabilities.get(feature))
+            available = feature == 'read_controls' or bool(capabilities.get(feature))
             if feature == 'wake':
                 try:
                     available = self.experimental_wake.get() and not self.selected_device().experimental
@@ -1059,6 +1077,8 @@ class PartyUpApp(TuningUI):
             if feature == 'eq_band':
                 available = bool(capabilities.get('eq')) and self.selected_snapshot.get('eq') is not None
                 available = available and any(code == 4 for _, code in self.eq_choices)
+            if self.guest_controls_locked() or (feature == 'sticky' and self.group_preference_locked()):
+                available = False
             for widget in widgets:
                 if not available:
                     self.set_widget_state(widget, 'disabled')
@@ -1184,6 +1204,7 @@ class PartyUpApp(TuningUI):
 
     def show_group(self, result):
         host = self.host()
+        self.broadcast_states[host.address] = result.host_on
         self.member_tree.delete(*self.member_tree.get_children())
         self.member_speakers = {}
         state = 'PartyUp enabled' if result.host_on else 'PartyUp off' if result.host_on is False else 'State unconfirmed'
@@ -1214,15 +1235,12 @@ class PartyUpApp(TuningUI):
             self.root.after(IDLE_POLL_MS,self.poll)
 
     def show_playback_notice(self, message):
-        guest = str(message).startswith('Guest controls are paused')
-        explanation = (
-            'Guest controls are unavailable while PartyUp is on.\n\n'
-            'Stop PartyUp first, then read the guest again.\n'
-            'No guest control connection was opened.' if guest else
-            'Stop PartyUp before changing Remember PartyUp group.\n\n'
-            'Your previous setting has been restored.\n'
-            'No preference change was sent.')
-        messagebox.showwarning('Change blocked to protect playback', explanation, parent=self.root)
+        # The guard's confirmed active state also locks stale/previously enabled UI.
+        try:
+            self.broadcast_states[self.host().address] = True
+        except ValueError:
+            pass
+        self.update_enabled()
 
     def _poll_events(self):
         processed = 0

@@ -21,7 +21,7 @@ class TuningUI:
         self.tune_undo.pack(side='left', padx=(0, 5))
         self.tune_reset = self.button(row, 'Reset changes', lambda: self.tune_action('reset'))
         self.tune_reset.pack(side='left', padx=(0, 5))
-        self.button(row, 'Read EQ', self.read_sound_controls).pack(side='left', padx=(0, 5))
+        self.button(row, 'Read EQ', self.read_sound_controls, 'read_controls').pack(side='left', padx=(0, 5))
         self.tune_save = self.button(row, 'Save as...', self.save_tuning_as)
         self.tune_save.pack(side='left')
         ttk.Label(card, text='Keeps the selected preset. Factory-preset band effect is unverified; steps are not dB.',
@@ -32,7 +32,7 @@ class TuningUI:
             return
         caps = self.selected_snapshot.get('capabilities', {})
         supported = bool(caps.get('eq')) if isinstance(caps,dict) else 'eq' in caps
-        ready = self.tuning.ready and not self.busy and supported
+        ready = self.tuning.ready and not self.busy and supported and not self.guest_controls_locked()
         for widget, allowed in ((self.tune_minus, ready and self.tuning.current.bands[0] > -128),
                                 (self.tune_plus, ready and self.tuning.current.bands[0] < 127),
                                 (self.tune_undo, ready and bool(self.tuning.history)),
