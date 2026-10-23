@@ -32,4 +32,4 @@ The guide describes a home screen with speaker identity and available controls, 
 
 `MegaphoneManager.initStreams` creates microphone capture, optional echo/noise processing, and a media AudioTrack. This supports treating Megaphone as a Windows audio-routing feature, not adding a guessed Bluetooth opcode.
 
-No APK, raw capture, decompiled method body, or real device identifier belongs in this repo. Method evidence files remain in the private work area. Research did not establish an exhaustive API inventory or prove there is no undiscovered timing control.
+No APK, raw capture, decompiled method body, or real device identifier belongs in this repo. Method evidence files remain in the private work area. Research did not establish an exhaustive API inventory or prove there is no undiscovered timing control.
