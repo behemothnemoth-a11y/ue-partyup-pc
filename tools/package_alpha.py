@@ -4,9 +4,11 @@ from pathlib import Path
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--publication-approved',action='store_true')
     args=parser.parse_args();root=Path(__file__).resolve().parents[1]
     version={};exec((root/'ue_partyup/__init__.py').read_text(),version)
     label=f"PartyUpPC-{version['__version__']}-alpha-candidate-win64"
+    if args.publication_approved: label=label.replace('-alpha-candidate-','-alpha-')
     if not (root/'dist/PartyUpPC/PartyUpPC.exe').is_file():raise SystemExit('Build the standalone bundle first')
     args.output.mkdir(parents=True,exist_ok=True);archive=args.output/(label+'.zip')
     if archive.exists():raise SystemExit('Candidate already exists; choose a new output directory')
@@ -16,7 +18,7 @@ def main():
             shutil.copy2(root/name,stage/name)
         shutil.copytree(root/'licenses',stage/'licenses');shutil.copytree(root/'docs',stage/'docs')
         commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
-        (stage/'BUILD-INFO.json').write_text(json.dumps({'version':version['__version__'],'source_commit':commit,'publication':'pending owner approval','unsigned':True},indent=2))
+        (stage/'BUILD-INFO.json').write_text(json.dumps({'version':version['__version__'],'source_commit':commit,'publication':'owner approved public alpha' if args.publication_approved else 'pending owner approval','unsigned':True},indent=2))
         files=sorted(p for p in stage.rglob('*') if p.is_file())
         for p in files:
             parts=[s.lower() for s in p.relative_to(stage).parts]
