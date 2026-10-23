@@ -1228,6 +1228,14 @@ class PartyUpApp(TuningUI):
                 for widget, state in self.controls:
                     self.set_widget_state(widget, state)
                 if kind == 'error':
+                    # A guard refused before any mutation: restore the confirmed UI,
+                    # rather than leaving an optimistic checkbox looking applied.
+                    if str(result).startswith(('Guest controls are paused',
+                                               'Stop PartyUp before changing Remember PartyUp group')):
+                        try:
+                            self.render_snapshot(self.selected_device(), self.selected_snapshot)
+                        except ValueError:
+                            pass
                     self.status.set(result)
                     self.append_log(f'Operation failed: {result}')
                 elif kind == 'discovery':

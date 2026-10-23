@@ -1,4 +1,4 @@
-# PartyUp PC 0.7.1 — experimental Windows alpha candidate
+# PartyUp PC 0.7.2 — experimental Windows alpha candidate
 
 Prepared privately; not published or approved for publication.
 

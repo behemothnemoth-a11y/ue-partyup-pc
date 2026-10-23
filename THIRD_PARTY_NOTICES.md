@@ -25,3 +25,4 @@ Python and its bundled components: licenses/Python-LICENSE.txt. Tk: licenses/Tk-
 | winrt-Windows.Foundation | 3.2.1 | [PyWinRT MIT license](licenses/PyWinRT-LICENSE.txt) |
 | winrt-Windows.Foundation.Collections | 3.2.1 | [PyWinRT MIT license](licenses/PyWinRT-LICENSE.txt) |
 | winrt-Windows.Storage.Streams | 3.2.1 | [PyWinRT MIT license](licenses/PyWinRT-LICENSE.txt) |
+Tcl 8.6.15: [retained license](licenses/Tcl-license.terms), from the matching upstream core-8-6-15 tag.

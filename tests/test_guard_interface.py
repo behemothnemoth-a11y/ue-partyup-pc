@@ -32,6 +32,7 @@ class GuardInterfaceTests(unittest.TestCase):
             try:
                 app.show_discovery([Speaker(1,'EVERBOOM main')],[])
                 app.render_snapshot(app.speakers[0],{'sticky':False,'capabilities':{'sticky':True},'errors':{}})
+                app.sticky.set(True)
                 session=AsyncMock();session.close=Mock();session.request.return_value=b'\2\0'
                 with patch('ue_partyup.controls.Session',return_value=session):
                     app.setting('set_sticky',True)
@@ -40,6 +41,7 @@ class GuardInterfaceTests(unittest.TestCase):
                     self.assertFalse(app.busy)
                     self.assertIn('Stop PartyUp before changing',app.status.get())
                     self.assertFalse(app.selected_snapshot['sticky'])
+                    self.assertFalse(app.sticky.get())
                     self.assertEqual(session.request.await_count,1)
                     self.assertTrue(session.request.call_args.kwargs['read'])
             finally:
