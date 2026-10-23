@@ -5,7 +5,7 @@ Prepared 2026-10-23. Publication requires explicit owner approval. Repository re
 ## Passed
 
 - 202 automated tests, including interface callback/result handling for both guard failures: clear error status, busy state released, main selection still usable, cached persistent setting unchanged.
-- Standalone asset/dependency check and UI smoke; current-user installation and live 0.7.1 appearance/playback owner-approved; 0.7.5 live disabled-control review pending.
+- Standalone asset/dependency check and UI smoke; current-user installation and live 0.7.1 appearance/playback owner-approved; 0.7.5 live disabled-control review passed: owner confirmed disabled controls correct and both playing.
 - Isolated empty LOCALAPPDATA/APPDATA test: self-check, smoke, install and installed smoke exit0; shortcut created; no imported speaker settings. Existing user data untouched. This is the same Windows host, not a second machine/account.
 - Current source and 159 unique historical Git blobs scanned for common credential formats, personal project paths and exact current selected speaker identifiers: no matches. This is a bounded scan, not proof of absence of all private information.
 - MIT selected by owner; LICENSE and third-party notices included, including Python, Tk, Silkscreen, PyWinRT and pinned dependency license files.
@@ -14,8 +14,8 @@ Prepared 2026-10-23. Publication requires explicit owner approval. Repository re
 
 ## Pending before owner approval
 
-- Guest guard owner-visible message/recovery passed in 0.7.1 with uninterrupted playback. Owner saw persistent-group rejection in 0.7.2 but requested more obvious messaging; checkbox/playback not confirmed in that reply. Owner requested an acknowledgment popup after the 0.7.3 panel. Owner confirmed playback intact and chose disabled controls instead of popup work. 0.7.5 disables guest/persistence controls for active/unchecked state, explains inline, and retains backend guards; visible disabled-state acceptance pending.
-- Final local archive manifest verification and current acceptance notes before approval.
+- Guest guard owner-visible message/recovery passed in 0.7.1 with uninterrupted playback. Owner saw persistent-group rejection in 0.7.2 but requested more obvious messaging; checkbox/playback not confirmed in that reply. Owner requested an acknowledgment popup after the 0.7.3 panel. Owner confirmed playback intact and chose disabled controls instead of popup work. 0.7.5 disables guest/persistence controls for active/unchecked state, explains inline, and retains backend guards; visible disabled-state acceptance passed: owner confirmed correct controls and both playing.
+- Final archive is prepared locally with current acceptance notes and source revision. Publication remains pending explicit owner approval.
 - Fresh installation on a second Windows machine is not established. Candidate is unsigned. These must stay explicit alpha limitations.
 
 ## Restricted and unverified

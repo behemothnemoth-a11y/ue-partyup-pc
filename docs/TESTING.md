@@ -35,3 +35,5 @@ Run `python -m unittest discover -s tests -v`, then build with `Build Private.ps
 
 Stage14 owner requested a popup instead of the warning panel; other stage results unconfirmed. 0.7.4 uses a native parented warning popup requiring OK/close acknowledgment. Automated tests mock the dialog and verify its message/parent, restored checkbox and released busy state. Live popup acceptance pending.
 Stage15 clarification: owner confirmed both still playing; issue was popup only. Owner approved disabling affected controls.0.7.5 disables guest features/Read/quick tuning and sticky for active/unchecked states; confirmed off unlocks.202 tests passed including state matrix; main Read remains enabled. Live visual acceptance pending.
+
+Stage16 final acceptance: owner confirmed in installed0.7.5 that guest Read/controls and Remember group are disabled correctly, main Read available, both speakers playing. No popup or speaker change required. Final restriction/UI acceptance passed.
