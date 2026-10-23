@@ -1,4 +1,4 @@
-# PartyUp PC 0.7.2 — experimental Windows alpha candidate
+# PartyUp PC 0.7.3 — experimental Windows alpha candidate
 
 Prepared privately; not published or approved for publication.
 
@@ -7,3 +7,5 @@ Independent UE speaker music-group controller with a pixel-art music classroom, 
 Playback safeguards block guest control connections and persistent-group changes during active PartyUp. This restricts affected features; it does not resolve the underlying interruptions. Stop PartyUp explicitly before guest controls. Missing membership reports remain unknown. See README for all limits.
 
 Windows x64 folder bundle; extract the whole archive, run Install Private.cmd, then open PartyUp PC from Start. No Python or admin rights required. Unsigned. No account, telemetry or automatic updates. Close the old controller before opening an update. User settings persist separately. Keep the prior version for manual rollback.
+
+Blocked actions now show a persistent high-contrast warning panel above the content, with the reason, next step and Dismiss button. Preference checkboxes restore their confirmed state.

@@ -30,3 +30,5 @@ Fresh installation on a second machine; physical ten-speaker groups; older model
 Run `python -m unittest discover -s tests -v`, then build with `Build Private.ps1`. `PartyUpPC.exe --self-check --report <file>` checks bundled dependencies/assets; `--smoke` constructs and closes the UI without discovery or speaker commands. Never label a successful command acknowledgement as audible acceptance.
 
 0.7.2 alpha preparation: 201 tests passed, including restoration of a staged persistent-group checkbox after a guard refusal. Isolated empty-app-data self-check/install/installed-smoke all passed. Owner passed visible guest safeguard in 0.7.1: message displayed, main selectable, both playing. Updated 0.7.2 opened/responding; visible persistence safeguard/checkbox test pending. No speaker commands were sent for controller replacement.
+
+0.7.2 Stage13: owner saw the rejection but requested a more obvious message. That reply did not confirm checkbox restoration or playback continuity. 0.7.3 adds a prominent persistent warning panel above page content with reason, next step and Dismiss; automated checks cover visibility, message and dismissal. Live acceptance pending.
